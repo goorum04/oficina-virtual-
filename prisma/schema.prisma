@@ -57,7 +57,19 @@ model Message {
   agentId   String
   createdAt DateTime @default(now())
 
-  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agent       Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  attachments Attachment[]
+}
+
+model Attachment {
+  id        String   @id @default(cuid())
+  filename  String
+  mimeType  String
+  data      String   // base64-encoded file content
+  messageId String
+  createdAt DateTime @default(now())
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
 }
 
 model Task {
