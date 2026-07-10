@@ -14,7 +14,7 @@ de reuniones para presentar un reporte del proyecto.
 - [Next.js](https://nextjs.org/) 16 (App Router) + TypeScript
 - [react-three-fiber](https://docs.pmnd.rs/react-three-fiber) / [three.js](https://threejs.org/) + drei para la escena 3D (`src/components/office/Scene3D.tsx`)
 - Tailwind CSS + shadcn/ui para la interfaz superpuesta
-- Prisma + SQLite para persistir proyectos, agentes, tareas y actividad
+- Prisma + PostgreSQL (p.ej. [Supabase](https://supabase.com/)) para persistir proyectos, agentes, tareas y actividad
 - Socket.IO para actualizaciones en tiempo real (servicio independiente en `mini-services/office-ws`)
 
 ## Estructura
@@ -36,13 +36,23 @@ Requiere [Bun](https://bun.sh/).
 
 ```bash
 bun install
-cp .env.example .env      # ajusta DATABASE_URL / NEXT_PUBLIC_WS_URL si hace falta
-bun run db:push           # crea el esquema en db/custom.db
+cp .env.example .env      # completa DATABASE_URL con tu Postgres (Supabase, etc.)
+bun run db:push           # crea el esquema en la base
 bun run db:seed           # (opcional) datos de ejemplo
 
 bun run dev               # Next.js en http://localhost:3000
 bun run dev:ws            # servicio WebSocket en el puerto 3004 (otra terminal)
 ```
+
+## Despliegue en Vercel
+
+Vercel no soporta procesos persistentes, así que el servicio WebSocket
+(`mini-services/office-ws`) no corre ahí — la app sigue funcionando (el botón
+"Simular" recarga los datos), pero sin push en tiempo real a menos que aloje
+ese servicio aparte (Railway, Fly.io, etc.) y apunte `NEXT_PUBLIC_WS_URL` a él.
+Necesita una base Postgres accesible desde internet (SQLite no funciona en
+funciones serverless). Configura `DATABASE_URL` como variable de entorno del
+proyecto en Vercel.
 
 La app funciona sin el servicio WebSocket (la actividad se recarga al pulsar
 "Simular"), pero con él las actualizaciones de agentes/tareas/actividad
@@ -54,10 +64,10 @@ llegan en tiempo real a todos los clientes conectados al mismo proyecto.
 |---------------------|-------------------------------------------------|
 | `bun run dev`       | Servidor de desarrollo Next.js                  |
 | `bun run dev:ws`    | Servicio WebSocket (`mini-services/office-ws`)  |
-| `bun run build`     | Build de producción (standalone)                |
+| `bun run build`     | Build de producción                             |
 | `bun run start`     | Sirve el build de producción                    |
 | `bun run lint`      | ESLint                                          |
-| `bun run db:push`   | Sincroniza el esquema Prisma con la base SQLite |
+| `bun run db:push`   | Sincroniza el esquema Prisma con la base Postgres |
 | `bun run db:seed`   | Carga datos de ejemplo                          |
 
 ## Desarrollo histórico
