@@ -34,10 +34,19 @@ model Agent {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  githubRepo String? // "owner/repo" this agent is allowed to open PRs against
+
   project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   tasks    Task[]
   logs     ActivityLog[]
   messages Message[]
+}
+
+model GithubConnection {
+  id             String   @id @default(cuid())
+  installationId String   @unique
+  accountLogin   String
+  createdAt      DateTime @default(now())
 }
 
 model Message {

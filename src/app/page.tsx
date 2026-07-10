@@ -6,7 +6,7 @@ import { io, Socket } from 'socket.io-client'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Briefcase, FolderOpen, Users, Loader2, Play, X,
-  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, MessageSquare, Send, Crown
+  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, MessageSquare, Send, Crown, Github
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -26,7 +26,7 @@ interface ProjectDetail extends Project {
   tasks: (Task & { agent?: { id: string; name: string; avatar: string } | null })[]
   logs: ActivityLog[]
 }
-interface Agent { id: string; name: string; role: string; function?: string | null; avatar: string; brain?: string; status: string; isSpokesperson?: boolean; tasks?: Task[] }
+interface Agent { id: string; name: string; role: string; function?: string | null; avatar: string; brain?: string; status: string; isSpokesperson?: boolean; githubRepo?: string | null; tasks?: Task[] }
 interface ChatMessage { id: string; role: string; content: string; createdAt: string }
 
 const ST: Record<string, { l: string; c: string; i: React.ReactNode }> = {
@@ -194,6 +194,39 @@ export default function VirtualOffice() {
     } catch { }
     setChatSending(false)
   }, [chatInput, selectedAgent, chatSending])
+
+  /* ═══ GITHUB ═══ */
+  const [githubConnected, setGithubConnected] = useState(false)
+  const [githubAccount, setGithubAccount] = useState('')
+  const [githubRepos, setGithubRepos] = useState<string[]>([])
+
+  const loadGithubStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/github/repos')
+      const data = await res.json()
+      setGithubConnected(!!data.connected)
+      setGithubAccount(data.account || '')
+      setGithubRepos(data.repos || [])
+    } catch { }
+  }, [])
+
+  useEffect(() => {
+    loadGithubStatus()
+    if (typeof window !== 'undefined' && window.location.search.includes('github=')) {
+      window.history.replaceState({}, '', window.location.pathname)
+    }
+  }, [loadGithubStatus])
+
+  const assignRepo = useCallback(async (agentId: string, repo: string) => {
+    const res = await fetch(`/api/agents/${agentId}/github`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo: repo || null }),
+    })
+    const updated = await res.json()
+    setAllAgents(prev => prev.map(a => a.id === agentId ? { ...a, githubRepo: updated.githubRepo } : a))
+    setSelectedAgent(prev => prev && prev.id === agentId ? { ...prev, githubRepo: updated.githubRepo } : prev)
+  }, [])
 
   /* ═══ MEETING STATE ═══ */
   const [meetingPhase, setMeetingPhase] = useState<string>('idle')
@@ -364,6 +397,20 @@ export default function VirtualOffice() {
                 <span className="text-white/90 font-semibold">{avgProgress}%</span>
               </div>
             </div>
+
+            {githubConnected ? (
+              <div className="pointer-events-auto flex items-center gap-1.5 bg-black/40 border border-white/[0.06] rounded-xl px-3 py-2 text-xs text-white/50">
+                <Github className="w-3.5 h-3.5 text-emerald-400" />
+                {githubAccount}
+              </div>
+            ) : (
+              <a href="/api/github/connect" className="pointer-events-auto">
+                <Button size="sm" className="rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white shadow-lg border-0">
+                  <Github className="w-3.5 h-3.5 mr-1.5" />
+                  Conectar GitHub
+                </Button>
+              </a>
+            )}
 
             {allAgents.some(a => a.isSpokesperson) && (
               <Button
@@ -576,6 +623,30 @@ export default function VirtualOffice() {
                   </div>
                 )}
               </div>
+
+              {/* GitHub repo assignment */}
+              {githubConnected && (
+                <div className="border-t border-white/[0.06] p-4">
+                  <h4 className="text-white/50 text-[10px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <Github className="w-3 h-3" /> Repositorio
+                  </h4>
+                  <select
+                    value={selectedAgent.githubRepo || ''}
+                    onChange={e => assignRepo(selectedAgent.id, e.target.value)}
+                    className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-violet-500/50"
+                  >
+                    <option value="" className="bg-zinc-900">Sin repositorio asignado</option>
+                    {githubRepos.map(r => (
+                      <option key={r} value={r} className="bg-zinc-900">{r}</option>
+                    ))}
+                  </select>
+                  {selectedAgent.githubRepo && (
+                    <p className="text-white/30 text-[10px] mt-1.5">
+                      Puede leer/escribir archivos y abrir PRs en este repo. Solo mergea si tú lo confirmas en el chat.
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* Chat */}
               <div className="border-t border-white/[0.06] p-4">
