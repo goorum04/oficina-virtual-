@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useMemo, useState } from 'react'
+import { useRef, useMemo, useState, useEffect } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, RoundedBox, Text, Html, Float, Environment } from '@react-three/drei'
 import * as THREE from 'three'
@@ -1404,6 +1404,33 @@ function RestRoom() {
       <pointLight position={[-3.5, 2.5, 5.2]} intensity={0.4} color="#f0e0cc" distance={4} decay={2} />
       <pointLight position={[-6.5, 2.5, 4.8]} intensity={0.3} color="#d0ffe0" distance={3} decay={2} />
 
+      {/* ─── EXTRA REST SPOTS ─── */}
+      {/* Floor cushion facing the TV */}
+      <group position={[-5.8, 0, 4.0]}>
+        <mesh position={[0, 0.08, 0]} castShadow>
+          <cylinderGeometry args={[0.28, 0.3, 0.14, 16]} />
+          <meshStandardMaterial color="#7c2d92" roughness={0.9} />
+        </mesh>
+      </group>
+      {/* Second gaming bean bag */}
+      <group position={[-6.9, 0, 3.9]}>
+        <mesh position={[0, 0.12, 0]} castShadow>
+          <sphereGeometry args={[0.36, 14, 10]} />
+          <meshStandardMaterial color="#0f766e" roughness={0.95} />
+        </mesh>
+        <mesh position={[0, 0.27, 0]}>
+          <sphereGeometry args={[0.26, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.35]} />
+          <meshStandardMaterial color="#115e59" roughness={0.95} />
+        </mesh>
+      </group>
+      {/* Reading nook floor cushion near the plant */}
+      <group position={[-7.0, 0, 5.0]}>
+        <mesh position={[0, 0.07, 0]} castShadow>
+          <cylinderGeometry args={[0.3, 0.32, 0.12, 16]} />
+          <meshStandardMaterial color="#92400e" roughness={0.9} />
+        </mesh>
+      </group>
+
       {/* ─── DECORATIONS ─── */}
       <Plant position={[-7.3, 0, 5.8]} />
       {/* Cozy carpet under TV area */}
@@ -1552,14 +1579,18 @@ function MeetingAgent({ agent, deskPos, meetingChair, phase, isSpokesperson, rep
 }
 
 /* ═══════════════════ REST POSITIONS ═════════════════ */
+// 7 distinct spots — one per agent, so a full idle team never overlaps.
 const REST_POSITIONS: { pos: [number, number, number]; rot: number; activity: 'tv' | 'reading' | 'gaming' }[] = [
-  // TV sofa - 2 spots facing the TV
+  // TV sofa - 2 spots facing the TV, + 1 floor cushion in front
   { pos: [-5.4, 0, 3.2], rot: 0, activity: 'tv' },
   { pos: [-4.6, 0, 3.2], rot: 0, activity: 'tv' },
-  // Gaming - bean bag facing left wall screen
+  { pos: [-5.8, 0, 4.0], rot: 0, activity: 'tv' },
+  // Gaming - 2 bean bags facing left wall screen
   { pos: [-6.3, 0, 4.8], rot: -Math.PI / 2, activity: 'gaming' },
-  // Reading - armchair
+  { pos: [-6.9, 0, 3.9], rot: -Math.PI / 3, activity: 'gaming' },
+  // Reading - armchair + a floor cushion nook
   { pos: [-3.2, 0, 5.3], rot: Math.PI + 0.5, activity: 'reading' },
+  { pos: [-7.0, 0, 5.0], rot: Math.PI / 2, activity: 'reading' },
 ]
 
 /* ═══════════════════ REST AGENT (walks to break room + does activities) ═══════════════════ */
@@ -1703,6 +1734,24 @@ export default function OfficeScene({
     { pos: [3, 0, 0.5], chair: [3, 0, -0.3], rot: 0 },
   ], [])
 
+  // Idle agents periodically rotate through rest-room activities so they
+  // feel like they have their own life instead of freezing in one spot.
+  const [restRotation, setRestRotation] = useState(0)
+  useEffect(() => {
+    let cancelled = false
+    const scheduleNext = () => {
+      const delay = 25000 + Math.random() * 20000
+      const timeout = setTimeout(() => {
+        if (cancelled) return
+        setRestRotation(r => r + 1 + Math.floor(Math.random() * 2))
+        scheduleNext()
+      }, delay)
+      return timeout
+    }
+    const timeout = scheduleNext()
+    return () => { cancelled = true; clearTimeout(timeout) }
+  }, [])
+
   return (
     <Canvas
       shadows
@@ -1797,9 +1846,11 @@ export default function OfficeScene({
             const isIdle = agent.status === 'idle'
 
             if (isIdle) {
-              // Calculate which rest spot this idle agent gets
+              // Calculate which rest spot this idle agent gets — rotates
+              // over time (restRotation) so idle agents cycle through
+              // different activities instead of freezing in one spot.
               const idleAgentsBefore = agents.slice(0, i).filter(a => a.status === 'idle').length
-              const restSpot = REST_POSITIONS[idleAgentsBefore % REST_POSITIONS.length]
+              const restSpot = REST_POSITIONS[(idleAgentsBefore + restRotation) % REST_POSITIONS.length]
 
               return (
                 <group key={agent.id}>

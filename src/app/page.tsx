@@ -6,7 +6,7 @@ import { io, Socket } from 'socket.io-client'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Briefcase, FolderOpen, Users, Loader2, Play, X,
-  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, MessageSquare, Send, Crown, Github
+  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, ChevronDown, MessageSquare, Send, Crown, Github
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -196,6 +196,9 @@ export default function VirtualOffice() {
     setChatSending(false)
   }, [chatInput, selectedAgent, chatSending])
 
+  /* ═══ TEAM DROPDOWN ═══ */
+  const [teamMenuOpenFor, setTeamMenuOpenFor] = useState<string | null>(null)
+
   /* ═══ GITHUB ═══ */
   const [githubConnected, setGithubConnected] = useState(false)
   const [githubAccount, setGithubAccount] = useState('')
@@ -350,18 +353,62 @@ export default function VirtualOffice() {
             </div>
 
             {projects.map(p => (
-              <button
-                key={p.id}
-                onClick={() => loadProject(p.id)}
-                className={`pointer-events-auto flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all duration-200 border ${
-                  currentProject?.id === p.id
-                    ? 'bg-white/15 border-white/20 text-white shadow-lg'
-                    : 'bg-black/40 border-white/[0.06] text-white/50 hover:bg-black/60 hover:text-white/70'
-                } backdrop-blur-xl`}
-              >
-                <FolderOpen className="w-3.5 h-3.5" />
-                {p.name}
-              </button>
+              <div key={p.id} className="relative">
+                <button
+                  onClick={() => {
+                    loadProject(p.id)
+                    setTeamMenuOpenFor(prev => prev === p.id ? null : p.id)
+                  }}
+                  className={`pointer-events-auto flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all duration-200 border ${
+                    currentProject?.id === p.id
+                      ? 'bg-white/15 border-white/20 text-white shadow-lg'
+                      : 'bg-black/40 border-white/[0.06] text-white/50 hover:bg-black/60 hover:text-white/70'
+                  } backdrop-blur-xl`}
+                >
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  {p.name}
+                  <ChevronDown className={`w-3 h-3 transition-transform ${teamMenuOpenFor === p.id ? 'rotate-180' : ''}`} />
+                </button>
+
+                <AnimatePresence>
+                  {teamMenuOpenFor === p.id && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setTeamMenuOpenFor(null)} />
+                      <motion.div
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -8 }}
+                        className="absolute top-full left-0 mt-2 w-64 z-50 bg-black/80 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden"
+                      >
+                        <div className="px-3.5 py-2.5 border-b border-white/[0.06] text-white/40 text-[10px] font-semibold uppercase tracking-wider">
+                          Agentes del equipo
+                        </div>
+                        <ScrollArea className="max-h-72">
+                          <div className="p-1.5">
+                            {allAgents.map(a => (
+                              <button
+                                key={a.id}
+                                onClick={() => { setSelectedAgent(a); setTeamMenuOpenFor(null) }}
+                                className="w-full flex items-center gap-2.5 px-2.5 py-2 rounded-xl hover:bg-white/[0.06] transition-colors text-left"
+                              >
+                                <span className="text-lg flex-shrink-0">{a.avatar}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-xs text-white/90 font-medium truncate">{a.name}</span>
+                                    {a.isSpokesperson && <Crown className="w-3 h-3 text-amber-400 flex-shrink-0" />}
+                                  </div>
+                                  <span className="text-[10px] text-white/40 truncate block">{a.role}</span>
+                                </div>
+                                <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: ST[a.status]?.c || '#71717a' }} />
+                              </button>
+                            ))}
+                          </div>
+                        </ScrollArea>
+                      </motion.div>
+                    </>
+                  )}
+                </AnimatePresence>
+              </div>
             ))}
           </div>
 
