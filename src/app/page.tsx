@@ -6,7 +6,7 @@ import { io, Socket } from 'socket.io-client'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Briefcase, FolderOpen, Users, Loader2, Play, X,
-  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, MessageSquare
+  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, MessageSquare, Send, Crown
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -26,7 +26,8 @@ interface ProjectDetail extends Project {
   tasks: (Task & { agent?: { id: string; name: string; avatar: string } | null })[]
   logs: ActivityLog[]
 }
-interface Agent { id: string; name: string; role: string; avatar: string; brain?: string; status: string; tasks?: Task[] }
+interface Agent { id: string; name: string; role: string; function?: string | null; avatar: string; brain?: string; status: string; isSpokesperson?: boolean; tasks?: Task[] }
+interface ChatMessage { id: string; role: string; content: string; createdAt: string }
 
 const ST: Record<string, { l: string; c: string; i: React.ReactNode }> = {
   working: { l: 'Trabajando', c: '#22c55e', i: <Activity className="w-3 h-3" /> },
@@ -154,6 +155,46 @@ export default function VirtualOffice() {
     setSimulating(false)
   }, [currentProject])
 
+  /* ═══ CHAT ═══ */
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [chatSending, setChatSending] = useState(false)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!selectedAgent) { setChatMessages([]); return }
+    setChatLoading(true)
+    fetch(`/api/agents/${selectedAgent.id}/chat`)
+      .then(r => r.json())
+      .then((data: ChatMessage[]) => setChatMessages(Array.isArray(data) ? data : []))
+      .catch(() => setChatMessages([]))
+      .finally(() => setChatLoading(false))
+  }, [selectedAgent?.id])
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [chatMessages])
+
+  const sendChatMessage = useCallback(async () => {
+    const text = chatInput.trim()
+    if (!text || !selectedAgent || chatSending) return
+    setChatInput('')
+    setChatSending(true)
+    try {
+      const res = await fetch(`/api/agents/${selectedAgent.id}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      })
+      const data = await res.json()
+      if (data.userMessage && data.agentMessage) {
+        setChatMessages(prev => [...prev, data.userMessage, data.agentMessage])
+      }
+    } catch { }
+    setChatSending(false)
+  }, [chatInput, selectedAgent, chatSending])
+
   /* ═══ MEETING STATE ═══ */
   const [meetingPhase, setMeetingPhase] = useState<string>('idle')
   const [spokespersonId, setSpokespersonId] = useState<string>('')
@@ -163,8 +204,8 @@ export default function VirtualOffice() {
   const generateReport = useCallback(() => {
     const agents = allAgents
     if (agents.length === 0) return { spokespersonId: '', lines: [] }
-    // Pick the architect or first agent as spokesperson
-    const spokesperson = agents.find(a => a.role === 'architect') || agents[0]
+    // Pick the spokesperson or first agent
+    const spokesperson = agents.find(a => a.isSpokesperson) || agents[0]
     const allTasks = agents.flatMap(a => a.tasks || [])
     const totalT = allTasks.length
     const completedT = allTasks.filter(t => t.status === 'completed').length
@@ -324,6 +365,17 @@ export default function VirtualOffice() {
               </div>
             </div>
 
+            {allAgents.some(a => a.isSpokesperson) && (
+              <Button
+                onClick={() => setSelectedAgent(allAgents.find(a => a.isSpokesperson) || null)}
+                size="sm"
+                className="rounded-xl bg-amber-600 hover:bg-amber-500 text-white shadow-lg shadow-amber-600/20 border-0"
+              >
+                <Crown className="w-3.5 h-3.5 mr-1.5" />
+                Hablar con Portavoz
+              </Button>
+            )}
+
             <Button
               onClick={simulate}
               disabled={simulating || meetingPhase !== 'idle'}
@@ -444,7 +496,7 @@ export default function VirtualOffice() {
             animate={{ opacity: 1, x: 0, scale: 1 }}
             exit={{ opacity: 0, x: 20, scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            className="absolute top-20 right-4 z-40 w-80"
+            className="absolute top-20 right-4 z-40 w-96"
           >
             <div className="bg-black/70 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden">
               {/* Header */}
@@ -466,10 +518,16 @@ export default function VirtualOffice() {
                     {selectedAgent.name.charAt(0)}
                   </div>
                   <div>
-                    <h3 className="text-white font-semibold text-sm">{selectedAgent.name}</h3>
+                    <div className="flex items-center gap-1.5">
+                      <h3 className="text-white font-semibold text-sm">{selectedAgent.name}</h3>
+                      {selectedAgent.isSpokesperson && <Crown className="w-3.5 h-3.5 text-amber-400" />}
+                    </div>
                     <p className="text-white/40 text-xs capitalize">{selectedAgent.role}</p>
                   </div>
                 </div>
+                {selectedAgent.function && (
+                  <p className="text-white/50 text-xs mt-2 leading-relaxed">{selectedAgent.function}</p>
+                )}
                 {/* Brain type badge */}
                 {selectedAgent.brain && (
                   <div className="flex items-center gap-2 mt-2">
@@ -517,6 +575,52 @@ export default function VirtualOffice() {
                     ))}
                   </div>
                 )}
+              </div>
+
+              {/* Chat */}
+              <div className="border-t border-white/[0.06] p-4">
+                <h4 className="text-white/50 text-[10px] font-semibold uppercase tracking-wider mb-3">
+                  Chat {selectedAgent.isSpokesperson && '· reportes y auditorías'}
+                </h4>
+                <ScrollArea className="h-52 pr-2">
+                  <div className="space-y-2">
+                    {chatLoading ? (
+                      <div className="flex justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-white/30" /></div>
+                    ) : chatMessages.length === 0 ? (
+                      <p className="text-white/20 text-xs">Escribe para empezar a hablar con {selectedAgent.name}.</p>
+                    ) : (
+                      chatMessages.map(m => (
+                        <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`max-w-[85%] rounded-xl px-3 py-1.5 text-xs leading-relaxed ${
+                            m.role === 'user'
+                              ? 'bg-violet-600/80 text-white'
+                              : 'bg-white/[0.06] text-white/80'
+                          }`}>
+                            {m.content}
+                          </div>
+                        </div>
+                      ))
+                    )}
+                    <div ref={chatEndRef} />
+                  </div>
+                </ScrollArea>
+                <div className="flex items-center gap-2 mt-3">
+                  <input
+                    value={chatInput}
+                    onChange={e => setChatInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') sendChatMessage() }}
+                    placeholder="Escribe un mensaje..."
+                    disabled={chatSending}
+                    className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-white/25 outline-none focus:border-violet-500/50"
+                  />
+                  <button
+                    onClick={sendChatMessage}
+                    disabled={chatSending || !chatInput.trim()}
+                    className="w-8 h-8 flex-shrink-0 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 flex items-center justify-center transition-colors"
+                  >
+                    {chatSending ? <Loader2 className="w-3.5 h-3.5 text-white animate-spin" /> : <Send className="w-3.5 h-3.5 text-white" />}
+                  </button>
+                </div>
               </div>
             </div>
           </motion.div>

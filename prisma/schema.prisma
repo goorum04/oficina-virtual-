@@ -22,19 +22,32 @@ model Project {
 }
 
 model Agent {
-  id        String   @id @default(cuid())
-  name      String
-  role      String   // developer, reviewer, tester, designer, architect
-  avatar    String   // emoji or initials
-  brain     String   @default("claude-sonnet") // claude-opus, claude-sonnet, claude-haiku, gpt-4o, gemini-pro, llama-3, mistral
-  status    String   @default("idle") // idle, working, thinking, waiting, error
-  projectId String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String   @id @default(cuid())
+  name           String
+  role           String   // developer, reviewer, tester, designer, architect
+  function       String?  // human-readable description of what this agent does
+  avatar         String   // emoji or initials
+  brain          String   @default("claude-sonnet") // claude-opus, claude-sonnet, claude-haiku, gpt-4o, gemini-pro, llama-3, mistral
+  status         String   @default("idle") // idle, working, thinking, waiting, error
+  isSpokesperson Boolean  @default(false)
+  projectId      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   tasks    Task[]
   logs     ActivityLog[]
+  messages Message[]
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  role      String   // 'user' or 'agent'
+  content   String
+  agentId   String
+  createdAt DateTime @default(now())
+
+  agent Agent @relation(fields: [agentId], references: [id], onDelete: Cascade)
 }
 
 model Task {

@@ -5,7 +5,11 @@ IA: cada agente aparece en su escritorio, con una animación distinta según su
 estado (escribiendo, pensando, en espera, en descanso), un tipo de "cerebro"
 (Claude Opus/Sonnet/Haiku, GPT-4o, Gemini, Llama, Mistral) con su propio
 color/tamaño/velocidad, y puede reunirse con el resto del equipo en la sala
-de reuniones para presentar un reporte del proyecto.
+de reuniones para presentar un reporte del proyecto. Uno de los agentes es el
+**portavoz** (Project Manager): es con quien se habla por defecto para pedir
+reportes o auditorías, aunque también se puede chatear directamente con
+cualquier otro agente. Las respuestas del chat las genera Claude a través de
+la API de Anthropic.
 
 ![Vista de la oficina virtual](docs/preview.png)
 
@@ -25,9 +29,9 @@ src/app/api/                Endpoints REST (proyectos, agentes, tareas, activida
 src/components/office/      Escena 3D (oficina, escritorios, agentes, sala de reuniones, descanso)
 src/components/ui/          Componentes shadcn/ui
 src/lib/                    Cliente de Prisma y helper de notificaciones WebSocket
-prisma/schema.prisma        Modelos: Project, Agent, Task, ActivityLog
+prisma/schema.prisma        Modelos: Project, Agent, Task, ActivityLog, Message
 mini-services/office-ws/    Servicio Socket.IO independiente (puerto 3004)
-scripts/seed.ts             Datos de ejemplo (3 proyectos, 7 agentes, tareas y logs)
+scripts/seed.ts             Crea el equipo de 7 agentes con sus roles y portavoz
 ```
 
 ## Desarrollo local
@@ -36,9 +40,9 @@ Requiere [Bun](https://bun.sh/).
 
 ```bash
 bun install
-cp .env.example .env      # completa DATABASE_URL con tu Postgres (Supabase, etc.)
+cp .env.example .env      # completa DATABASE_URL (Postgres) y ANTHROPIC_API_KEY
 bun run db:push           # crea el esquema en la base
-bun run db:seed           # (opcional) datos de ejemplo
+bun run db:seed           # crea el equipo de 7 agentes
 
 bun run dev               # Next.js en http://localhost:3000
 bun run dev:ws            # servicio WebSocket en el puerto 3004 (otra terminal)
