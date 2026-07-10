@@ -1,0 +1,70 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  status      String   @default("active") // active, paused, completed
+  color       String   @default("#10b981")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  agents  Agent[]
+  tasks   Task[]
+  logs    ActivityLog[]
+}
+
+model Agent {
+  id        String   @id @default(cuid())
+  name      String
+  role      String   // developer, reviewer, tester, designer, architect
+  avatar    String   // emoji or initials
+  brain     String   @default("claude-sonnet") // claude-opus, claude-sonnet, claude-haiku, gpt-4o, gemini-pro, llama-3, mistral
+  status    String   @default("idle") // idle, working, thinking, waiting, error
+  projectId String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project  Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  tasks    Task[]
+  logs     ActivityLog[]
+}
+
+model Task {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  status      String   @default("pending") // pending, in_progress, completed, failed
+  priority    String   @default("medium") // low, medium, high, critical
+  progress    Int      @default(0)
+  agentId     String?
+  projectId   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  agent   Agent?       @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  project Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  logs    ActivityLog[]
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  type      String   // task_started, task_progress, task_completed, agent_message, error, info
+  message   String
+  metadata  String?  // JSON string for extra data
+  agentId   String?
+  taskId    String?
+  projectId String
+  createdAt DateTime @default(now())
+
+  agent  Agent?  @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
