@@ -6,7 +6,7 @@ import { io, Socket } from 'socket.io-client'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Briefcase, FolderOpen, Users, Loader2, Play, X,
-  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, ChevronDown, MessageSquare, Send, Crown, Github
+  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, ChevronDown, MessageSquare, Send, Crown, Github, Paperclip, FileText, Image as ImageIcon
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -27,7 +27,23 @@ interface ProjectDetail extends Project {
   logs: ActivityLog[]
 }
 interface Agent { id: string; name: string; role: string; function?: string | null; avatar: string; brain?: string; status: string; isSpokesperson?: boolean; githubRepo?: string | null; tasks?: Task[] }
-interface ChatMessage { id: string; role: string; content: string; model?: string | null; createdAt: string }
+interface MessageAttachment { id: string; filename: string; mimeType: string }
+interface ChatMessage { id: string; role: string; content: string; model?: string | null; createdAt: string; attachments?: MessageAttachment[] }
+interface PendingAttachment { filename: string; mimeType: string; data: string }
+
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024 // 8MB per file
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result as string
+      resolve(result.split(',')[1] || '')
+    }
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
 const MODEL_LABEL: Record<string, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus' }
 
 const ST: Record<string, { l: string; c: string; i: React.ReactNode }> = {
@@ -161,9 +177,33 @@ export default function VirtualOffice() {
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [chatSending, setChatSending] = useState(false)
+  const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([])
+  const [fileError, setFileError] = useState('')
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFilesSelected = useCallback(async (files: FileList | null) => {
+    if (!files || files.length === 0) return
+    setFileError('')
+    const accepted: PendingAttachment[] = []
+    for (const file of Array.from(files)) {
+      if (file.size > MAX_UPLOAD_BYTES) {
+        setFileError(`"${file.name}" supera el límite de 8MB`)
+        continue
+      }
+      if (pendingFiles.length + accepted.length >= 4) {
+        setFileError('Máximo 4 archivos por mensaje')
+        break
+      }
+      const data = await fileToBase64(file)
+      accepted.push({ filename: file.name, mimeType: file.type || 'application/octet-stream', data })
+    }
+    setPendingFiles(prev => [...prev, ...accepted])
+  }, [pendingFiles])
 
   useEffect(() => {
+    setPendingFiles([])
+    setFileError('')
     if (!selectedAgent) { setChatMessages([]); return }
     setChatLoading(true)
     fetch(`/api/agents/${selectedAgent.id}/chat`)
@@ -179,14 +219,17 @@ export default function VirtualOffice() {
 
   const sendChatMessage = useCallback(async () => {
     const text = chatInput.trim()
-    if (!text || !selectedAgent || chatSending) return
+    if ((!text && pendingFiles.length === 0) || !selectedAgent || chatSending) return
+    const attachments = pendingFiles
     setChatInput('')
+    setPendingFiles([])
+    setFileError('')
     setChatSending(true)
     try {
       const res = await fetch(`/api/agents/${selectedAgent.id}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, attachments }),
       })
       const data = await res.json()
       if (data.userMessage && data.agentMessage) {
@@ -194,7 +237,7 @@ export default function VirtualOffice() {
       }
     } catch { }
     setChatSending(false)
-  }, [chatInput, selectedAgent, chatSending])
+  }, [chatInput, pendingFiles, selectedAgent, chatSending])
 
   /* ═══ TEAM DROPDOWN ═══ */
   const [teamMenuOpenFor, setTeamMenuOpenFor] = useState<string | null>(null)
@@ -710,13 +753,25 @@ export default function VirtualOffice() {
                     ) : (
                       chatMessages.map(m => (
                         <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
-                          <div className={`max-w-[85%] rounded-xl px-3 py-1.5 text-xs leading-relaxed ${
-                            m.role === 'user'
-                              ? 'bg-violet-600/80 text-white'
-                              : 'bg-white/[0.06] text-white/80'
-                          }`}>
-                            {m.content}
-                          </div>
+                          {m.attachments && m.attachments.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mb-1 max-w-[85%] justify-end">
+                              {m.attachments.map(a => (
+                                <span key={a.id} className="flex items-center gap-1 bg-white/[0.08] border border-white/[0.08] rounded-md px-1.5 py-0.5 text-[9px] text-white/50">
+                                  {a.mimeType.startsWith('image/') ? <ImageIcon className="w-2.5 h-2.5" /> : <FileText className="w-2.5 h-2.5" />}
+                                  {a.filename}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {m.content && (
+                            <div className={`max-w-[85%] rounded-xl px-3 py-1.5 text-xs leading-relaxed ${
+                              m.role === 'user'
+                                ? 'bg-violet-600/80 text-white'
+                                : 'bg-white/[0.06] text-white/80'
+                            }`}>
+                              {m.content}
+                            </div>
+                          )}
                           {m.role === 'agent' && m.model && (
                             <span className="text-[9px] text-white/25 mt-0.5 px-1">{MODEL_LABEL[m.model] || m.model}</span>
                           )}
@@ -726,7 +781,40 @@ export default function VirtualOffice() {
                     <div ref={chatEndRef} />
                   </div>
                 </ScrollArea>
+                {pendingFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-3">
+                    {pendingFiles.map((f, i) => (
+                      <span key={i} className="flex items-center gap-1 bg-white/[0.08] border border-white/[0.08] rounded-md pl-1.5 pr-1 py-0.5 text-[10px] text-white/60">
+                        {f.mimeType.startsWith('image/') ? <ImageIcon className="w-2.5 h-2.5" /> : <FileText className="w-2.5 h-2.5" />}
+                        {f.filename}
+                        <button
+                          onClick={() => setPendingFiles(prev => prev.filter((_, idx) => idx !== i))}
+                          className="ml-0.5 hover:text-white"
+                        >
+                          <X className="w-2.5 h-2.5" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {fileError && <p className="text-red-400 text-[10px] mt-2">{fileError}</p>}
                 <div className="flex items-center gap-2 mt-3">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,application/pdf,text/*,.json"
+                    className="hidden"
+                    onChange={e => { handleFilesSelected(e.target.files); e.target.value = '' }}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={chatSending}
+                    title="Adjuntar archivo"
+                    className="w-8 h-8 flex-shrink-0 rounded-lg bg-white/[0.05] border border-white/[0.08] hover:bg-white/[0.1] disabled:opacity-40 flex items-center justify-center transition-colors"
+                  >
+                    <Paperclip className="w-3.5 h-3.5 text-white/60" />
+                  </button>
                   <input
                     value={chatInput}
                     onChange={e => setChatInput(e.target.value)}
@@ -737,7 +825,7 @@ export default function VirtualOffice() {
                   />
                   <button
                     onClick={sendChatMessage}
-                    disabled={chatSending || !chatInput.trim()}
+                    disabled={chatSending || (!chatInput.trim() && pendingFiles.length === 0)}
                     className="w-8 h-8 flex-shrink-0 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 flex items-center justify-center transition-colors"
                   >
                     {chatSending ? <Loader2 className="w-3.5 h-3.5 text-white animate-spin" /> : <Send className="w-3.5 h-3.5 text-white" />}

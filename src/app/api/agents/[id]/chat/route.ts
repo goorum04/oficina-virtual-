@@ -15,8 +15,66 @@ export async function GET(
   const messages = await db.message.findMany({
     where: { agentId: id },
     orderBy: { createdAt: 'asc' },
+    include: { attachments: { select: { id: true, filename: true, mimeType: true } } },
   })
   return NextResponse.json(messages)
+}
+
+const MAX_ATTACHMENTS = 4
+const MAX_ATTACHMENT_BASE64_LEN = 15_000_000 // ~11MB decoded
+
+type IncomingAttachment = { filename: string; mimeType: string; data: string }
+
+function sanitizeAttachments(input: unknown): IncomingAttachment[] {
+  if (!Array.isArray(input)) return []
+  return input
+    .filter((a): a is IncomingAttachment =>
+      a && typeof a === 'object' &&
+      typeof (a as IncomingAttachment).filename === 'string' &&
+      typeof (a as IncomingAttachment).mimeType === 'string' &&
+      typeof (a as IncomingAttachment).data === 'string' &&
+      (a as IncomingAttachment).data.length > 0 &&
+      (a as IncomingAttachment).data.length <= MAX_ATTACHMENT_BASE64_LEN
+    )
+    .slice(0, MAX_ATTACHMENTS)
+}
+
+const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'] as const
+
+function attachmentContentBlocks(attachments: IncomingAttachment[]): Anthropic.ContentBlockParam[] {
+  const blocks: Anthropic.ContentBlockParam[] = []
+  for (const att of attachments) {
+    if ((SUPPORTED_IMAGE_TYPES as readonly string[]).includes(att.mimeType)) {
+      blocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: att.mimeType as (typeof SUPPORTED_IMAGE_TYPES)[number], data: att.data },
+      })
+    } else if (att.mimeType === 'application/pdf') {
+      blocks.push({
+        type: 'document',
+        source: { type: 'base64', media_type: 'application/pdf', data: att.data },
+      })
+    } else if (att.mimeType.startsWith('text/') || att.mimeType === 'application/json') {
+      let decoded = ''
+      try {
+        decoded = Buffer.from(att.data, 'base64').toString('utf-8')
+      } catch {
+        decoded = ''
+      }
+      blocks.push({
+        type: 'text',
+        text: decoded
+          ? `Archivo adjunto "${att.filename}":\n\n${decoded.slice(0, 20000)}`
+          : `[Adjuntó el archivo "${att.filename}" pero no se pudo leer su contenido]`,
+      })
+    } else {
+      blocks.push({
+        type: 'text',
+        text: `[Adjuntó el archivo "${att.filename}" (${att.mimeType}), formato no compatible para analizar directamente]`,
+      })
+    }
+  }
+  return blocks
 }
 
 function systemPromptFor(agent: {
@@ -94,9 +152,10 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  const { message } = await req.json()
+  const { message, attachments: rawAttachments } = await req.json()
+  const attachments = sanitizeAttachments(rawAttachments)
 
-  if (!message || typeof message !== 'string') {
+  if ((!message || typeof message !== 'string') && attachments.length === 0) {
     return NextResponse.json({ error: 'message required' }, { status: 400 })
   }
 
@@ -106,7 +165,15 @@ export async function POST(
   }
 
   const userMessage = await db.message.create({
-    data: { role: 'user', content: message, agentId: id },
+    data: {
+      role: 'user',
+      content: message || '',
+      agentId: id,
+      ...(attachments.length
+        ? { attachments: { create: attachments.map(a => ({ filename: a.filename, mimeType: a.mimeType, data: a.data })) } }
+        : {}),
+    },
+    include: { attachments: { select: { id: true, filename: true, mimeType: true } } },
   })
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -131,6 +198,7 @@ export async function POST(
     where: { agentId: id },
     orderBy: { createdAt: 'asc' },
     take: 20,
+    include: { attachments: { select: { filename: true } } },
   })
 
   let octokit: Octokit | undefined
@@ -146,16 +214,26 @@ export async function POST(
 
   await db.agent.update({ where: { id }, data: { status: 'thinking' } })
 
-  const tier = pickModel(message, agent)
+  const tier = pickModel(message || (attachments.length ? 'analiza este archivo' : ''), agent)
 
   try {
     const text = await runAgentTurn({
       model: MODELS[tier],
       system: systemPromptFor(agent, teammates),
-      history: history.map(m => ({
-        role: m.role === 'user' ? 'user' : 'assistant',
-        content: m.content,
-      })),
+      history: history.map(m => {
+        if (m.id === userMessage.id && attachments.length) {
+          const blocks = attachmentContentBlocks(attachments)
+          if (m.content) blocks.push({ type: 'text', text: m.content })
+          return { role: 'user', content: blocks }
+        }
+        const placeholder = m.attachments.length
+          ? `\n[Adjuntó: ${m.attachments.map(a => a.filename).join(', ')}]`
+          : ''
+        return {
+          role: m.role === 'user' ? 'user' : 'assistant',
+          content: (m.content || '(archivo adjunto)') + placeholder,
+        }
+      }),
       tools: agent.githubRepo ? GITHUB_TOOLS : undefined,
       octokit,
       owner,
