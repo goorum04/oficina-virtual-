@@ -3,6 +3,7 @@ import { anthropic } from '@/lib/anthropic'
 import { getInstallationOctokit } from '@/lib/github'
 import { GITHUB_TOOLS, runGithubTool } from '@/lib/github-tools'
 import { MODELS, pickModel } from '@/lib/model-router'
+import { calcCostUsd } from '@/lib/pricing'
 import { NextResponse } from 'next/server'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { Octokit } from '@octokit/rest'
@@ -111,8 +112,10 @@ async function runAgentTurn(opts: {
   octokit?: Octokit
   owner?: string
   repo?: string
-}): Promise<string> {
+}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const messages: Anthropic.MessageParam[] = [...opts.history]
+  let inputTokens = 0
+  let outputTokens = 0
 
   for (let i = 0; i < 6; i++) {
     const response = await anthropic.messages.create({
@@ -122,12 +125,15 @@ async function runAgentTurn(opts: {
       tools: opts.tools,
       messages,
     })
+    inputTokens += response.usage.input_tokens
+    outputTokens += response.usage.output_tokens
 
     if (response.stop_reason !== 'tool_use') {
-      return response.content
+      const text = response.content
         .filter((b): b is Anthropic.TextBlock => b.type === 'text')
         .map(b => b.text)
         .join('\n') || '(sin respuesta)'
+      return { text, inputTokens, outputTokens }
     }
 
     messages.push({ role: 'assistant', content: response.content })
@@ -144,7 +150,7 @@ async function runAgentTurn(opts: {
     messages.push({ role: 'user', content: toolResults })
   }
 
-  return '(demasiados pasos de herramientas en esta petición, intenta algo más simple)'
+  return { text: '(demasiados pasos de herramientas en esta petición, intenta algo más simple)', inputTokens, outputTokens }
 }
 
 export async function POST(
@@ -217,7 +223,7 @@ export async function POST(
   const tier = pickModel(message || (attachments.length ? 'analiza este archivo' : ''), agent)
 
   try {
-    const text = await runAgentTurn({
+    const { text, inputTokens, outputTokens } = await runAgentTurn({
       model: MODELS[tier],
       system: systemPromptFor(agent, teammates),
       history: history.map(m => {
@@ -240,8 +246,9 @@ export async function POST(
       repo,
     })
 
+    const costUsd = calcCostUsd(tier, inputTokens, outputTokens)
     const agentMessage = await db.message.create({
-      data: { role: 'agent', content: text, model: tier, agentId: id },
+      data: { role: 'agent', content: text, model: tier, inputTokens, outputTokens, costUsd, agentId: id },
     })
     await db.agent.update({ where: { id }, data: { status: 'idle' } })
 

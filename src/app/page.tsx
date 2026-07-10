@@ -6,7 +6,7 @@ import { io, Socket } from 'socket.io-client'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Briefcase, FolderOpen, Users, Loader2, Play, X,
-  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, ChevronDown, MessageSquare, Send, Crown, Github, Paperclip, FileText, Image as ImageIcon
+  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, ChevronDown, MessageSquare, Send, Crown, Github, Paperclip, FileText, Image as ImageIcon, DollarSign
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -28,7 +28,7 @@ interface ProjectDetail extends Project {
 }
 interface Agent { id: string; name: string; role: string; function?: string | null; avatar: string; brain?: string; status: string; isSpokesperson?: boolean; githubRepo?: string | null; tasks?: Task[] }
 interface MessageAttachment { id: string; filename: string; mimeType: string }
-interface ChatMessage { id: string; role: string; content: string; model?: string | null; createdAt: string; attachments?: MessageAttachment[] }
+interface ChatMessage { id: string; role: string; content: string; model?: string | null; costUsd?: number | null; createdAt: string; attachments?: MessageAttachment[] }
 interface PendingAttachment { filename: string; mimeType: string; data: string }
 
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024 // 8MB per file
@@ -45,6 +45,11 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 const MODEL_LABEL: Record<string, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus' }
+function formatCost(usd: number): string {
+  if (usd === 0) return '$0.00'
+  if (usd < 0.01) return `$${usd.toFixed(4)}`
+  return `$${usd.toFixed(2)}`
+}
 
 const ST: Record<string, { l: string; c: string; i: React.ReactNode }> = {
   working: { l: 'Trabajando', c: '#22c55e', i: <Activity className="w-3 h-3" /> },
@@ -172,6 +177,23 @@ export default function VirtualOffice() {
     setSimulating(false)
   }, [currentProject])
 
+  /* ═══ COSTS ═══ */
+  const [totalCostUsd, setTotalCostUsd] = useState(0)
+  const [costByAgent, setCostByAgent] = useState<Record<string, number>>({})
+
+  const loadCosts = useCallback(async () => {
+    try {
+      const res = await fetch('/api/costs')
+      const data = await res.json()
+      setTotalCostUsd(data.total || 0)
+      setCostByAgent(data.byAgent || {})
+    } catch { }
+  }, [])
+
+  useEffect(() => {
+    loadCosts()
+  }, [loadCosts])
+
   /* ═══ CHAT ═══ */
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [chatInput, setChatInput] = useState('')
@@ -234,10 +256,11 @@ export default function VirtualOffice() {
       const data = await res.json()
       if (data.userMessage && data.agentMessage) {
         setChatMessages(prev => [...prev, data.userMessage, data.agentMessage])
+        if (data.agentMessage.costUsd) loadCosts()
       }
     } catch { }
     setChatSending(false)
-  }, [chatInput, pendingFiles, selectedAgent, chatSending])
+  }, [chatInput, pendingFiles, selectedAgent, chatSending, loadCosts])
 
   /* ═══ TEAM DROPDOWN ═══ */
   const [teamMenuOpenFor, setTeamMenuOpenFor] = useState<string | null>(null)
@@ -442,6 +465,9 @@ export default function VirtualOffice() {
                                   </div>
                                   <span className="text-[10px] text-white/40 truncate block">{a.role}</span>
                                 </div>
+                                {!!costByAgent[a.id] && (
+                                  <span className="text-[10px] text-lime-400/70 font-medium flex-shrink-0">{formatCost(costByAgent[a.id])}</span>
+                                )}
                                 <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: ST[a.status]?.c || '#71717a' }} />
                               </button>
                             ))}
@@ -486,6 +512,11 @@ export default function VirtualOffice() {
               <div className="flex items-center gap-1.5 text-xs min-w-[60px]">
                 <span className="text-white/40">Progreso</span>
                 <span className="text-white/90 font-semibold">{avgProgress}%</span>
+              </div>
+              <div className="w-px h-4 bg-white/10" />
+              <div className="flex items-center gap-1.5 text-xs" title="Gasto total en IA">
+                <DollarSign className="w-3.5 h-3.5 text-lime-400" />
+                <span className="text-lime-300 font-semibold">{formatCost(totalCostUsd)}</span>
               </div>
             </div>
 
@@ -741,9 +772,17 @@ export default function VirtualOffice() {
 
               {/* Chat */}
               <div className="border-t border-white/[0.06] p-4">
-                <h4 className="text-white/50 text-[10px] font-semibold uppercase tracking-wider mb-3">
-                  Chat {selectedAgent.isSpokesperson && '· reportes y auditorías'}
-                </h4>
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="text-white/50 text-[10px] font-semibold uppercase tracking-wider">
+                    Chat {selectedAgent.isSpokesperson && '· reportes y auditorías'}
+                  </h4>
+                  {!!costByAgent[selectedAgent.id] && (
+                    <span className="flex items-center gap-1 text-[10px] text-lime-400/80 font-medium">
+                      <DollarSign className="w-2.5 h-2.5" />
+                      {formatCost(costByAgent[selectedAgent.id])}
+                    </span>
+                  )}
+                </div>
                 <ScrollArea className="h-52 pr-2">
                   <div className="space-y-2">
                     {chatLoading ? (
@@ -773,7 +812,10 @@ export default function VirtualOffice() {
                             </div>
                           )}
                           {m.role === 'agent' && m.model && (
-                            <span className="text-[9px] text-white/25 mt-0.5 px-1">{MODEL_LABEL[m.model] || m.model}</span>
+                            <span className="text-[9px] text-white/25 mt-0.5 px-1">
+                              {MODEL_LABEL[m.model] || m.model}
+                              {!!m.costUsd && ` · ${formatCost(m.costUsd)}`}
+                            </span>
                           )}
                         </div>
                       ))
