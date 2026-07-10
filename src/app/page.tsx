@@ -6,7 +6,7 @@ import { io, Socket } from 'socket.io-client'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Briefcase, FolderOpen, Users, Loader2, Play, X,
-  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, ChevronDown, MessageSquare, Send, Crown, Github, Paperclip, FileText, Image as ImageIcon, DollarSign
+  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, ChevronDown, MessageSquare, Send, Crown, Github, Paperclip, FileText, Image as ImageIcon, Euro
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -45,10 +45,12 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 const MODEL_LABEL: Record<string, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus' }
+const USD_TO_EUR = 0.92 // tipo de cambio aproximado fijo (el coste real de la API se factura en USD)
 function formatCost(usd: number): string {
-  if (usd === 0) return '$0.00'
-  if (usd < 0.01) return `$${usd.toFixed(4)}`
-  return `$${usd.toFixed(2)}`
+  const eur = usd * USD_TO_EUR
+  if (eur === 0) return '0,00 €'
+  if (eur < 0.01) return `${eur.toFixed(4).replace('.', ',')} €`
+  return `${eur.toFixed(2).replace('.', ',')} €`
 }
 
 const ST: Record<string, { l: string; c: string; i: React.ReactNode }> = {
@@ -515,7 +517,7 @@ export default function VirtualOffice() {
               </div>
               <div className="w-px h-4 bg-white/10" />
               <div className="flex items-center gap-1.5 text-xs" title="Gasto total en IA">
-                <DollarSign className="w-3.5 h-3.5 text-lime-400" />
+                <Euro className="w-3.5 h-3.5 text-lime-400" />
                 <span className="text-lime-300 font-semibold">{formatCost(totalCostUsd)}</span>
               </div>
             </div>
@@ -778,7 +780,7 @@ export default function VirtualOffice() {
                   </h4>
                   {!!costByAgent[selectedAgent.id] && (
                     <span className="flex items-center gap-1 text-[10px] text-lime-400/80 font-medium">
-                      <DollarSign className="w-2.5 h-2.5" />
+                      <Euro className="w-2.5 h-2.5" />
                       {formatCost(costByAgent[selectedAgent.id])}
                     </span>
                   )}
