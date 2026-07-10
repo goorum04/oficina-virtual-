@@ -1,7 +1,8 @@
 import { db } from '@/lib/db'
-import { anthropic, CHAT_MODEL } from '@/lib/anthropic'
+import { anthropic } from '@/lib/anthropic'
 import { getInstallationOctokit } from '@/lib/github'
 import { GITHUB_TOOLS, runGithubTool } from '@/lib/github-tools'
+import { MODELS, pickModel } from '@/lib/model-router'
 import { NextResponse } from 'next/server'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { Octokit } from '@octokit/rest'
@@ -45,6 +46,7 @@ Tienes acceso al repositorio de GitHub "${agent.githubRepo}" mediante herramient
 }
 
 async function runAgentTurn(opts: {
+  model: string
   system: string
   history: Anthropic.MessageParam[]
   tools?: Anthropic.Tool[]
@@ -56,7 +58,7 @@ async function runAgentTurn(opts: {
 
   for (let i = 0; i < 6; i++) {
     const response = await anthropic.messages.create({
-      model: CHAT_MODEL,
+      model: opts.model,
       max_tokens: 1024,
       system: opts.system,
       tools: opts.tools,
@@ -144,8 +146,11 @@ export async function POST(
 
   await db.agent.update({ where: { id }, data: { status: 'thinking' } })
 
+  const tier = pickModel(message, agent)
+
   try {
     const text = await runAgentTurn({
+      model: MODELS[tier],
       system: systemPromptFor(agent, teammates),
       history: history.map(m => ({
         role: m.role === 'user' ? 'user' : 'assistant',
@@ -158,7 +163,7 @@ export async function POST(
     })
 
     const agentMessage = await db.message.create({
-      data: { role: 'agent', content: text, agentId: id },
+      data: { role: 'agent', content: text, model: tier, agentId: id },
     })
     await db.agent.update({ where: { id }, data: { status: 'idle' } })
 

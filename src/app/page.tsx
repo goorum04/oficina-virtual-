@@ -27,7 +27,8 @@ interface ProjectDetail extends Project {
   logs: ActivityLog[]
 }
 interface Agent { id: string; name: string; role: string; function?: string | null; avatar: string; brain?: string; status: string; isSpokesperson?: boolean; githubRepo?: string | null; tasks?: Task[] }
-interface ChatMessage { id: string; role: string; content: string; createdAt: string }
+interface ChatMessage { id: string; role: string; content: string; model?: string | null; createdAt: string }
+const MODEL_LABEL: Record<string, string> = { haiku: 'Haiku', sonnet: 'Sonnet', opus: 'Opus' }
 
 const ST: Record<string, { l: string; c: string; i: React.ReactNode }> = {
   working: { l: 'Trabajando', c: '#22c55e', i: <Activity className="w-3 h-3" /> },
@@ -661,7 +662,7 @@ export default function VirtualOffice() {
                       <p className="text-white/20 text-xs">Escribe para empezar a hablar con {selectedAgent.name}.</p>
                     ) : (
                       chatMessages.map(m => (
-                        <div key={m.id} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
                           <div className={`max-w-[85%] rounded-xl px-3 py-1.5 text-xs leading-relaxed ${
                             m.role === 'user'
                               ? 'bg-violet-600/80 text-white'
@@ -669,6 +670,9 @@ export default function VirtualOffice() {
                           }`}>
                             {m.content}
                           </div>
+                          {m.role === 'agent' && m.model && (
+                            <span className="text-[9px] text-white/25 mt-0.5 px-1">{MODEL_LABEL[m.model] || m.model}</span>
+                          )}
                         </div>
                       ))
                     )}

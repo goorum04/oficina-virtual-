@@ -53,6 +53,7 @@ model Message {
   id        String   @id @default(cuid())
   role      String   // 'user' or 'agent'
   content   String
+  model     String?  // model tier that generated this agent reply (haiku/sonnet/opus)
   agentId   String
   createdAt DateTime @default(now())
 
