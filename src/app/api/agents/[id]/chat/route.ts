@@ -2,6 +2,7 @@ import { db } from '@/lib/db'
 import { anthropic } from '@/lib/anthropic'
 import { getInstallationOctokit } from '@/lib/github'
 import { GITHUB_TOOLS, runGithubTool } from '@/lib/github-tools'
+import { AGENT_AREAS, AREA_LABELS, gestoriaToolsFor, isGestoriaTool, isGestoriaWriteTool, runGestoriaTool } from '@/lib/gestoria-tools'
 import { MODELS, pickModel } from '@/lib/model-router'
 import { calcCostUsd } from '@/lib/pricing'
 import { NextResponse } from 'next/server'
@@ -79,14 +80,30 @@ function attachmentContentBlocks(attachments: IncomingAttachment[]): Anthropic.C
 }
 
 function systemPromptFor(agent: {
+  id: string
   name: string
   role: string
   function: string | null
   isSpokesperson: boolean
   githubRepo: string | null
-}, teammates: { name: string; role: string }[]) {
-  let base = `Eres ${agent.name}, ${agent.role} en un equipo de agentes de IA de una agencia de desarrollo. Tu función: ${agent.function || 'sin descripción específica'}.
+}, teammates: { name: string; role: string }[], hasGestoriaTools: boolean) {
+  let base = `Eres ${agent.name}, ${agent.role} en el equipo de agentes de IA de una gestoría en Andorra (residencias, constitución de sociedades, Inversió Estrangera, KYC/UIFAND). Tu función: ${agent.function || 'sin descripción específica'}.
 Respondes en español, de forma profesional, breve y directa, como un compañero de equipo real (no como un asistente genérico). No inventes trabajo que no se te haya descrito; si no sabes algo, dilo.`
+
+  const area = AGENT_AREAS[agent.id]
+  if (hasGestoriaTools && area) {
+    base += `
+Gestionas GestoriaAD, la aplicación de gestión de la gestoría, mediante herramientas. Tu área es ${AREA_LABELS[area]}: encárgate de ella y, si te piden algo de otra área, dilo y sugiere hablar con el compañero que la lleva.
+Reglas:
+- Usa siempre las herramientas para consultar datos reales; nunca inventes clientes, fechas ni estados.
+- Para localizar a un cliente por nombre usa gestoria_buscar_clientes y trabaja con su id.
+- Antes de borrar algo o de una operación masiva, explica exactamente qué vas a hacer y espera a que el humano lo confirme.
+- Después de cambiar algo, resume en una línea qué has cambiado.
+- Son datos personales (KYC): no los repitas más de lo necesario.`
+  } else if (area) {
+    base += `
+(La conexión con GestoriaAD no está configurada todavía en el servidor: faltan GESTORIA_URL, GESTORIA_USER y GESTORIA_PASSWORD. Si te piden datos de la gestoría, dilo.)`
+  }
 
   if (agent.isSpokesperson) {
     const team = teammates.map(t => `- ${t.name} (${t.role})`).join('\n')
@@ -112,15 +129,16 @@ async function runAgentTurn(opts: {
   octokit?: Octokit
   owner?: string
   repo?: string
+  onWrite?: (toolName: string) => Promise<void>
 }): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const messages: Anthropic.MessageParam[] = [...opts.history]
   let inputTokens = 0
   let outputTokens = 0
 
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < 10; i++) {
     const response = await anthropic.messages.create({
       model: opts.model,
-      max_tokens: 1024,
+      max_tokens: 2048,
       system: opts.system,
       tools: opts.tools,
       messages,
@@ -141,9 +159,17 @@ async function runAgentTurn(opts: {
     const toolResults: Anthropic.ToolResultBlockParam[] = []
     for (const block of response.content) {
       if (block.type === 'tool_use') {
-        const result = opts.octokit && opts.owner && opts.repo
-          ? await runGithubTool(opts.octokit, opts.owner, opts.repo, block.name, block.input as Record<string, unknown>)
-          : 'GitHub tools not available for this agent.'
+        let result: string
+        if (isGestoriaTool(block.name)) {
+          result = await runGestoriaTool(block.name, block.input as Record<string, unknown>)
+          if (isGestoriaWriteTool(block.name) && !result.startsWith('Error') && !result.startsWith('No ejecutado')) {
+            await opts.onWrite?.(block.name)
+          }
+        } else {
+          result = opts.octokit && opts.owner && opts.repo
+            ? await runGithubTool(opts.octokit, opts.owner, opts.repo, block.name, block.input as Record<string, unknown>)
+            : 'GitHub tools not available for this agent.'
+        }
         toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result })
       }
     }
@@ -218,14 +244,17 @@ export async function POST(
     }
   }
 
+  const gestoriaTools = gestoriaToolsFor(agent)
+  const tools = [...gestoriaTools, ...(agent.githubRepo ? GITHUB_TOOLS : [])]
+
   await db.agent.update({ where: { id }, data: { status: 'thinking' } })
 
-  const tier = pickModel(message || (attachments.length ? 'analiza este archivo' : ''), agent)
+  const tier = pickModel(message || (attachments.length ? 'analiza este archivo' : ''), agent, gestoriaTools.length > 0)
 
   try {
     const { text, inputTokens, outputTokens } = await runAgentTurn({
       model: MODELS[tier],
-      system: systemPromptFor(agent, teammates),
+      system: systemPromptFor(agent, teammates, gestoriaTools.length > 0),
       history: history.map(m => {
         if (m.id === userMessage.id && attachments.length) {
           const blocks = attachmentContentBlocks(attachments)
@@ -240,10 +269,21 @@ export async function POST(
           content: (m.content || '(archivo adjunto)') + placeholder,
         }
       }),
-      tools: agent.githubRepo ? GITHUB_TOOLS : undefined,
+      tools: tools.length ? tools : undefined,
       octokit,
       owner,
       repo,
+      // Lo que cambia en GestoriaAD aparece también en la actividad de la oficina.
+      onWrite: async (toolName) => {
+        await db.activityLog.create({
+          data: {
+            type: 'agent_message',
+            message: `${agent.name}: ${toolName.replace(/^gestoria_/, '').replace(/_/g, ' ')} en GestoriaAD`,
+            agentId: id,
+            projectId: agent.projectId,
+          },
+        })
+      },
     })
 
     const costUsd = calcCostUsd(tier, inputTokens, outputTokens)

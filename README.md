@@ -11,6 +11,31 @@ reportes o auditorías, aunque también se puede chatear directamente con
 cualquier otro agente. Las respuestas del chat las genera Claude a través de
 la API de Anthropic.
 
+## Equipo de la gestoría
+
+Los agentes gestionan **GestoriaAD** (repo `goorum04/hubspot`) a través de su
+API, cada uno en un área concreta:
+
+| Agente | Área |
+|--------|------|
+| Nova (portavoz) | Coordinación: reportes de toda la gestoría, agenda, tareas del equipo, historial |
+| Clara | Clientes y KYC: altas, datos, documentación que falta, enlaces de subida |
+| Pau | Procesos: residencias, sociedades, IE y sus pasos |
+| Vera | Alertas, vencimientos y apostillas |
+| Dora | Documentación: registro, análisis KYC con IA, checklists IE |
+| Hugo | HubSpot: importaciones y sincronización |
+| Olga | Bandeja de entrada de Outlook |
+
+Las herramientas están en `src/lib/gestoria-tools.ts`. Borrar datos u
+operaciones masivas exigen que el humano lo confirme en el chat. Para
+conectarlo:
+
+1. En GestoriaAD, añade un usuario para la oficina a `APP_USERS`
+   (p.ej. `oficina:<clave>`); así su historial de cambios registra lo que
+   hacen los agentes.
+2. En la oficina, define `GESTORIA_URL`, `GESTORIA_USER` y `GESTORIA_PASSWORD`.
+3. `bun run db:seed` para crear el equipo (borra el equipo anterior y sus chats).
+
 ![Vista de la oficina virtual](docs/preview.png)
 
 ## Stack
@@ -31,7 +56,7 @@ src/components/ui/          Componentes shadcn/ui
 src/lib/                    Cliente de Prisma y helper de notificaciones WebSocket
 prisma/schema.prisma        Modelos: Project, Agent, Task, ActivityLog, Message
 mini-services/office-ws/    Servicio Socket.IO independiente (puerto 3004)
-scripts/seed.ts             Crea el equipo de 7 agentes con sus roles y portavoz
+scripts/seed.ts             Crea el equipo de 7 agentes de la gestoría con su área y portavoz
 ```
 
 ## Desarrollo local

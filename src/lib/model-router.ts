@@ -14,7 +14,11 @@ const REPORT_KEYWORDS = /\b(reporte|auditor[ií]a|resume|resumen|estado de|c[oó
  * so simple chit-chat uses the cheap/fast model and only real work pays
  * for the expensive one.
  */
-export function pickModel(message: string, agent: { githubRepo: string | null; isSpokesperson: boolean }): ModelTier {
+export function pickModel(
+  message: string,
+  agent: { githubRepo: string | null; isSpokesperson: boolean },
+  usesGestoriaTools = false
+): ModelTier {
   // Touching a real repo (reading/writing code, opening PRs) needs the strongest model.
   if (agent.githubRepo) return 'opus'
 
@@ -23,7 +27,9 @@ export function pickModel(message: string, agent: { githubRepo: string | null; i
   const isShort = message.trim().length < 60
   const looksComplex = COMPLEX_KEYWORDS.test(message)
 
-  if (!looksComplex && isShort) return 'haiku'
+  // Even a short order like "borra el proceso de X" changes real client data:
+  // agents wired to GestoriaAD never drop to the cheapest tier.
+  if (!looksComplex && isShort) return usesGestoriaTools ? 'sonnet' : 'haiku'
   if (looksComplex) return 'opus'
   return 'sonnet'
 }
