@@ -16,13 +16,14 @@ export async function gestoriaFetch(
 ): Promise<{ ok: boolean; status: number; data: unknown }> {
   const base = (process.env.GESTORIA_URL || '').replace(/\/+$/, '')
   const auth = Buffer.from(`${process.env.GESTORIA_USER}:${process.env.GESTORIA_PASSWORD}`).toString('base64')
+  const isForm = body instanceof FormData
   const res = await fetch(`${base}${path}`, {
     method,
     headers: {
       Authorization: `Basic ${auth}`,
-      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+      ...(body !== undefined && !isForm ? { 'Content-Type': 'application/json' } : {}),
     },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: isForm ? body : body !== undefined ? JSON.stringify(body) : undefined,
     cache: 'no-store',
   })
   const text = await res.text()
@@ -40,4 +41,16 @@ export function toToolText(data: unknown): string {
   return text.length > MAX_RESPONSE_CHARS
     ? `${text.slice(0, MAX_RESPONSE_CHARS)}\n…(respuesta recortada: usa filtros más concretos)`
     : text
+}
+
+// Sube un archivo (base64) a un endpoint multipart de GestoriaAD.
+export async function gestoriaUpload(
+  path: string,
+  fileName: string,
+  mimeType: string,
+  base64: string
+): Promise<{ ok: boolean; status: number; data: unknown }> {
+  const form = new FormData()
+  form.append('file', new Blob([Buffer.from(base64, 'base64')], { type: mimeType }), fileName)
+  return gestoriaFetch('POST', path, form)
 }

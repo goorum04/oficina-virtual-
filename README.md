@@ -34,7 +34,21 @@ conectarlo:
    (p.ej. `oficina:<clave>`); así su historial de cambios registra lo que
    hacen los agentes.
 2. En la oficina, define `GESTORIA_URL`, `GESTORIA_USER` y `GESTORIA_PASSWORD`.
-3. `bun run db:seed` para crear el equipo (borra el equipo anterior y sus chats).
+3. `bun run db:push` y `bun run db:seed` para crear las tablas nuevas y el
+   equipo (el seed borra el equipo anterior y sus chats).
+
+## Acceso al PC
+
+Con el programa `pc-bridge/` abierto en el PC de la gestoría, todos los
+agentes pueden ver, buscar, leer (también PDF e imágenes), crear, mover y
+borrar archivos, subirlos a la ficha de un cliente y ejecutar comandos.
+Borrar y ejecutar piden confirmación en el chat. Instalación en
+[`pc-bridge/README.md`](pc-bridge/README.md).
+
+## Acceso a la oficina
+
+La oficina entera pide usuario y contraseña (`APP_USERS`, igual que en
+GestoriaAD). En producción, sin `APP_USERS` no deja entrar a nadie.
 
 ![Vista de la oficina virtual](docs/preview.png)
 
@@ -56,6 +70,7 @@ src/components/ui/          Componentes shadcn/ui
 src/lib/                    Cliente de Prisma y helper de notificaciones WebSocket
 prisma/schema.prisma        Modelos: Project, Agent, Task, ActivityLog, Message
 mini-services/office-ws/    Servicio Socket.IO independiente (puerto 3004)
+pc-bridge/                  Programa para el PC de la gestoría (acceso de los agentes)
 scripts/seed.ts             Crea el equipo de 7 agentes de la gestoría con su área y portavoz
 ```
 

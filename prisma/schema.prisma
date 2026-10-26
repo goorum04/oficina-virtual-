@@ -106,3 +106,26 @@ model ActivityLog {
   task   Task?   @relation(fields: [taskId], references: [id], onDelete: SetNull)
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
+// Órdenes de los agentes para el PC de la gestoría. Vercel no puede llegar
+// al PC, así que el puente (pc-bridge/) las recoge preguntando cada pocos
+// segundos y devuelve el resultado.
+model PcCommand {
+  id          String    @id @default(cuid())
+  kind        String    // list, read, write, mkdir, move, delete, search, exec, info
+  payload     String    // JSON con los argumentos
+  status      String    @default("pending") // pending, running, done, error
+  result      String?   // JSON con la respuesta del puente
+  agentId     String?
+  createdAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  @@index([status, createdAt])
+}
+
+// Última vez que el puente del PC preguntó por órdenes (fila única "pc").
+model PcBridge {
+  id       String   @id
+  lastSeen DateTime
+  hostname String?
+  platform String?
+}
