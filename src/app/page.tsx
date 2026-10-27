@@ -451,9 +451,11 @@ export default function VirtualOffice() {
                         <div className="px-3.5 py-2.5 border-b border-white/[0.06] text-white/40 text-[10px] font-semibold uppercase tracking-wider">
                           Agentes del equipo
                         </div>
-                        <ScrollArea className="max-h-72">
+                        {/* Scroll nativo: el ScrollArea de Radix no respeta max-h y
+                            cortaba los últimos agentes sin dejar desplazarse. */}
+                        <div className="max-h-[70vh] overflow-y-auto">
                           <div className="p-1.5">
-                            {allAgents.map(a => (
+                            {[...allAgents].sort((x, y) => Number(!!y.isSpokesperson) - Number(!!x.isSpokesperson)).map(a => (
                               <button
                                 key={a.id}
                                 onClick={() => { setSelectedAgent(a); setTeamMenuOpenFor(null) }}
@@ -474,7 +476,7 @@ export default function VirtualOffice() {
                               </button>
                             ))}
                           </div>
-                        </ScrollArea>
+                        </div>
                       </motion.div>
                     </>
                   )}
