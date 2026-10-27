@@ -5,11 +5,14 @@ import { pcToolsFor } from '@/lib/pc-tools'
 import { mailToolsFor } from '@/lib/mail-tools'
 import { CALL_AGENT_ID, gestoriaToolsFor } from '@/lib/gestoria-tools'
 import { CASE_TOOL, runAgentTurn, systemPromptFor } from '@/lib/agent-turn'
+import { enqueueCaseByName } from '@/lib/case-worker'
 import { MODELS, pickModel } from '@/lib/model-router'
 import { calcCostUsd } from '@/lib/pricing'
 import { NextResponse } from 'next/server'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { Octokit } from '@octokit/rest'
+
+const ADVANCE_INTENT = /\b(avanza|avanzar|av[aá]nzame|ponte al d[ií]a|trabaja|trabajar|adelanta|sigue con|ocúpate de|ocupate de|encárgate de|encargate de)\b/i
 
 const PC_HINTS = /\b(carpeta|archivo|fichero|documento|pdf|word|excel|pc|ordenador|onedrive|disco|ejecuta|comando|escritorio|descarga|sube|subir|adjunt)/i
 
@@ -115,6 +118,18 @@ export async function POST(
     },
     include: { attachments: { select: { id: true, filename: true, mimeType: true } } },
   })
+
+  // "Avanza con Bencheikh", "ponte al día con Coskun"…: se encarga el
+  // expediente al gestor de caso directamente, sin depender de que el modelo
+  // elija la herramienta (y sin gastar IA en esta respuesta).
+  if (typeof message === 'string' && ADVANCE_INTENT.test(message) && gestoriaToolsFor(agent).length) {
+    const target = message.replace(new RegExp(ADVANCE_INTENT.source, 'gi'), ' ').replace(/\b(con|el|la|los|de|del|caso|expediente|cliente|por favor)\b/gi, ' ').replace(/[^\p{L}\s'-]/gu, ' ').trim()
+    if (target.length >= 3) {
+      const reply = await enqueueCaseByName(target)
+      const agentMessage = await db.message.create({ data: { role: 'agent', content: reply, agentId: id } })
+      return NextResponse.json({ userMessage, agentMessage })
+    }
+  }
 
   if (!process.env.ANTHROPIC_API_KEY) {
     const fallback = await db.message.create({
