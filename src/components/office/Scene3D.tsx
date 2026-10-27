@@ -258,7 +258,6 @@ function Desk({ position = [0, 0, 0], rotation = 0, status = 'idle' }: {
           </mesh>
         ))}
         {/* Screen glow */}
-        <pointLight position={[0, 0, 0.3]} intensity={0.25} color="#4466aa" distance={2} decay={2} />
       </group>
 
       {/* Keyboard */}
@@ -278,7 +277,6 @@ function Desk({ position = [0, 0, 0], rotation = 0, status = 'idle' }: {
         <meshStandardMaterial color={sc} emissive={sc} emissiveIntensity={3} />
       </mesh>
       {/* Status light glow */}
-      <pointLight position={[0.72, legH + 0.05, 0.35]} intensity={0.2} color={sc} distance={1.5} decay={2} />
 
       {/* Coffee mug (only when waiting) */}
       {status === 'waiting' && (
@@ -651,7 +649,6 @@ function AgentCharacter({ agent, position, deskRotation = 0, onClick, scale = 1 
                   <sphereGeometry args={[0.04, 8, 8]} />
                   <meshStandardMaterial color="#fbbf24" emissive="#fbbf24" emissiveIntensity={2} />
                 </mesh>
-                <pointLight intensity={0.3} color="#fbbf24" distance={1} decay={2} />
               </group>
             </Float>
           )}
@@ -664,7 +661,6 @@ function AgentCharacter({ agent, position, deskRotation = 0, onClick, scale = 1 
                   <coneGeometry args={[0.025, 0.06, 3]} />
                   <meshStandardMaterial color="#ef4444" emissive="#ef4444" emissiveIntensity={2} />
                 </mesh>
-                <pointLight intensity={0.3} color="#ef4444" distance={1} decay={2} />
               </group>
             </Float>
           )}
@@ -986,7 +982,6 @@ function ExecutiveDesk({ position, rotation = 0, status = 'idle' }: {
         <mesh><cylinderGeometry args={[0.07, 0.08, 0.02, 16]} /><meshStandardMaterial color="#c9a227" metalness={0.9} roughness={0.25} /></mesh>
         <mesh position={[0, 0.2, 0]}><cylinderGeometry args={[0.01, 0.01, 0.4, 8]} /><meshStandardMaterial color="#c9a227" metalness={0.9} roughness={0.25} /></mesh>
         <mesh position={[0, 0.42, 0.05]} rotation={[0.5, 0, 0]}><coneGeometry args={[0.09, 0.1, 16, 1, true]} /><meshStandardMaterial color="#1f2937" side={THREE.DoubleSide} /></mesh>
-        <pointLight position={[0, 0.35, 0.1]} intensity={0.5} color="#ffd9a0" distance={2} decay={2} />
       </group>
       {/* Keyboard, notebook, pen, nameplate */}
       <RoundedBox args={[0.4, 0.012, 0.13]} radius={0.005} position={[0, h + 0.045, -0.15]}>
@@ -1099,7 +1094,6 @@ function ExecutiveOffice({ leadName }: { leadName?: string }) {
       <GuestChair position={[cx + 0.45, 0, 4.15]} rotation={Math.PI} />
 
       {/* Warm light + label */}
-      <pointLight position={[cx, 2.6, cz]} intensity={1.1} color="#ffd9a0" distance={5} decay={1.6} />
       <Text position={[cx, 0.02, 5.4]} fontSize={0.13} color="#e6c66a" anchorX="center" anchorY="middle" rotation={[-Math.PI / 2, 0, 0]}>
         {leadName ? `DIRECCIÓN · ${leadName.toUpperCase()}` : 'DIRECCIÓN'}
       </Text>
@@ -1260,9 +1254,7 @@ function MeetingRoom() {
       ))}
 
       {/* ─── OVERHEAD LIGHT ─── */}
-      <pointLight position={[4, 3.2, 3]} intensity={1.2} color="#e8f0ff" distance={8} decay={1.5} />
       {/* Second light for back of room */}
-      <pointLight position={[4, 2.8, 5]} intensity={0.5} color="#f0f4ff" distance={5} decay={2} />
 
       {/* ─── FLOOR LABEL ─── */}
       <Text position={[4, 0.02, 5.3]} fontSize={0.1} color="rgba(255,255,255,0.25)" anchorX="center" anchorY="middle" rotation={[-Math.PI / 2, 0, 0]}>
@@ -1346,7 +1338,6 @@ function RestRoom() {
         <meshStandardMaterial color="#1b2a3a" emissive="#5d8fb8" emissiveIntensity={0.6} side={THREE.DoubleSide} />
       </mesh>
       {/* TV glow */}
-      <pointLight position={[-5, 1.5, 4.8]} intensity={0.6} color="#4488cc" distance={4} decay={2} />
 
       {/* ─── SOFA (facing TV) ─── */}
       <group position={[-5, 0, 3.2]}>
@@ -1427,7 +1418,6 @@ function RestRoom() {
         <meshStandardMaterial color="#f59e0b" emissive="#f59e0b" emissiveIntensity={0.4} transparent opacity={0.15} />
       </mesh>
       {/* Game screen glow */}
-      <pointLight position={[-7.0, 1.35, 4.8]} intensity={0.5} color="#22c55e" distance={3.5} decay={2} />
 
       {/* Game console under screen */}
       <RoundedBox args={[0.32, 0.08, 0.24]} radius={0.02} position={[-7.1, 0.3, 4.8]} castShadow>
@@ -1503,7 +1493,6 @@ function RestRoom() {
           <cylinderGeometry args={[0.15, 0.25, 0.3, 12, 1, true]} />
           <meshStandardMaterial color="#f5e6d0" roughness={0.8} transparent opacity={0.85} side={THREE.DoubleSide} />
         </mesh>
-        <pointLight position={[0, 1.8, 0]} intensity={0.7} color="#ffeedd" distance={4} decay={2} />
       </group>
 
       {/* Side table */}
@@ -1549,9 +1538,6 @@ function RestRoom() {
       </mesh>
 
       {/* ─── OVERHEAD LIGHTS ─── */}
-      <pointLight position={[-5, 2.8, 3.8]} intensity={0.9} color="#ffeedd" distance={6} decay={1.5} />
-      <pointLight position={[-3.5, 2.5, 5.2]} intensity={0.4} color="#f0e0cc" distance={4} decay={2} />
-      <pointLight position={[-6.5, 2.5, 4.8]} intensity={0.3} color="#d0ffe0" distance={3} decay={2} />
 
       {/* ─── EXTRA REST SPOTS ─── */}
       {/* Floor cushion facing the TV */}
@@ -1722,7 +1708,6 @@ function MeetingAgent({ agent, deskPos, meetingChair, phase, isSpokesperson, rep
             <sphereGeometry args={[0.03, 6, 6]} />
             <meshStandardMaterial color="#fff" emissive="#fff" emissiveIntensity={2} transparent opacity={0.7} />
           </mesh>
-          <pointLight intensity={0.1} color="#fff" distance={0.5} decay={3} />
         </group>
       )}
     </group>
@@ -1900,6 +1885,10 @@ export default function OfficeScene({
     <Canvas
       shadows
       orthographic
+      // Rendimiento: sin luces puntuales (solo ambiente + sol + cielo), sombras
+      // a 1024 y nitidez limitada en pantallas de alta densidad.
+      dpr={[1, 1.5]}
+      performance={{ min: 0.5 }}
       // Isométrica: cámara en la diagonal (x, y, z iguales) mirando al centro.
       camera={{ position: [20, 20, 20], zoom: 52, near: -100, far: 200 }}
       gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
@@ -1912,8 +1901,8 @@ export default function OfficeScene({
         intensity={1.6}
         color="#ffffff"
         castShadow
-        shadow-mapSize-width={2048}
-        shadow-mapSize-height={2048}
+        shadow-mapSize-width={1024}
+        shadow-mapSize-height={1024}
         shadow-camera-left={-14}
         shadow-camera-right={14}
         shadow-camera-top={12}
