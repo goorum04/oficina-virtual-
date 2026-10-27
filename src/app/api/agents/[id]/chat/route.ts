@@ -3,7 +3,7 @@ import { anthropic } from '@/lib/anthropic'
 import { getInstallationOctokit } from '@/lib/github'
 import { GITHUB_TOOLS, runGithubTool } from '@/lib/github-tools'
 import { pcToolsFor, isPcTool, isPcWriteTool, runPcTool, type ToolOutput } from '@/lib/pc-tools'
-import { AGENT_AREAS, AREA_LABELS, gestoriaToolsFor, isGestoriaTool, isGestoriaWriteTool, runGestoriaTool } from '@/lib/gestoria-tools'
+import { AGENT_AREAS, AREA_LABELS, CALL_AGENT_ID, gestoriaToolsFor, isGestoriaTool, isGestoriaWriteTool, runGestoriaTool } from '@/lib/gestoria-tools'
 import { MODELS, pickModel } from '@/lib/model-router'
 import { calcCostUsd } from '@/lib/pricing'
 import { NextResponse } from 'next/server'
@@ -107,6 +107,15 @@ Reglas:
   } else if (area) {
     base += `
 (La conexión con GestoriaAD no está activa todavía: el servidor necesita GESTORIA_URL, GESTORIA_USER, GESTORIA_PASSWORD y APP_USERS. Si te piden datos de la gestoría, dilo.)`
+  }
+
+  if (agent.id === CALL_AGENT_ID && hasGestoriaTools) {
+    base += `
+Atiendes al humano MIENTRAS habla por teléfono con un cliente: la velocidad lo es todo.
+- Cuando te pregunten por un cliente, llama directamente a gestoria_resumen_cliente con el nombre tal cual te lo den; no hagas otras consultas salvo que te pidan un detalle concreto.
+- Si hay varios candidatos, enuméralos en una línea y pregunta cuál.
+- Responde en un máximo de 8 líneas, para leer de un vistazo: estado general; cada proceso activo con su siguiente paso y si hay algo bloqueado; alertas o vencimientos próximos; qué documentación falta; último contacto (correo o reunión) con su fecha.
+- Sin introducciones ni despedidas. Fechas relativas cuando ayuden ("vence en 5 días").`
   }
 
   if (hasPcTools) {
@@ -246,12 +255,16 @@ export async function POST(
       })
     : []
 
-  const history = await db.message.findMany({
+  const isCallAgent = agent.id === CALL_AGENT_ID
+
+  // Los mensajes más recientes (no los primeros de la conversación), en
+  // orden cronológico. El agente de llamadas solo necesita los últimos.
+  const history = (await db.message.findMany({
     where: { agentId: id },
-    orderBy: { createdAt: 'asc' },
-    take: 20,
+    orderBy: { createdAt: 'desc' },
+    take: isCallAgent ? 6 : 20,
     include: { attachments: { select: { filename: true } } },
-  })
+  })).reverse()
 
   let octokit: Octokit | undefined
   let owner: string | undefined
@@ -265,12 +278,14 @@ export async function POST(
   }
 
   const gestoriaTools = gestoriaToolsFor(agent)
-  const pcTools = pcToolsFor()
+  // El agente de llamadas no usa el PC: cada herramienta de más hace la
+  // respuesta más lenta.
+  const pcTools = isCallAgent ? [] : pcToolsFor()
   const tools = [...gestoriaTools, ...pcTools, ...(agent.githubRepo ? GITHUB_TOOLS : [])]
 
   await db.agent.update({ where: { id }, data: { status: 'thinking' } })
 
-  const tier = pickModel(message || (attachments.length ? 'analiza este archivo' : ''), agent, tools.length > 0)
+  const tier = isCallAgent ? 'haiku' : pickModel(message || (attachments.length ? 'analiza este archivo' : ''), agent, tools.length > 0)
 
   try {
     const { text, inputTokens, outputTokens } = await runAgentTurn({

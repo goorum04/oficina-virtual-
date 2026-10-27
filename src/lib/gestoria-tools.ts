@@ -1,13 +1,14 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { gestoriaConfigured, gestoriaFetch, toToolText } from '@/lib/gestoria'
 import { officeProtected } from '@/lib/access'
+import { clientBriefing } from '@/lib/client-briefing'
 
 // Herramientas con las que los agentes de la oficina gestionan GestoriaAD.
 // Cada agente se encarga de un área (ver AGENT_AREAS) y solo recibe las
 // herramientas de su área más las de consulta comunes; el portavoz recibe
 // además todas las de consulta de las demás áreas para poder hacer reportes.
 
-export type GestoriaArea = 'coordinacion' | 'clientes' | 'procesos' | 'alertas' | 'documentos' | 'hubspot' | 'bandeja'
+export type GestoriaArea = 'coordinacion' | 'clientes' | 'procesos' | 'alertas' | 'documentos' | 'hubspot' | 'bandeja' | 'llamadas'
 
 type Method = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 type Input = Record<string, unknown>
@@ -22,7 +23,9 @@ interface GestoriaTool {
   readOnly?: boolean
   // Borra datos o hace cambios masivos: exige confirmado=true.
   needsConfirmation?: boolean
-  request: (input: Input) => { method: Method; path: string; body?: unknown }
+  request?: (input: Input) => { method: Method; path: string; body?: unknown }
+  // Para herramientas que combinan varias llamadas a la API.
+  run?: (input: Input) => Promise<unknown>
   // Reduce la respuesta a lo útil antes de pasársela al modelo.
   shape?: (data: unknown) => unknown
 }
@@ -82,6 +85,15 @@ const TOOLS: GestoriaTool[] = [
     name: 'gestoria_resumen',
     description: 'Cifras generales de la gestoría: procesos activos, alertas pendientes y vencidas, vencimientos a 30 días, documentos pendientes, tareas abiertas.',
     request: () => ({ method: 'GET', path: '/api/stats' }),
+  },
+
+  // ── Llamadas: resumen rápido de un cliente ────────────────────────────
+  {
+    area: 'llamadas', readOnly: true,
+    name: 'gestoria_resumen_cliente',
+    description: 'Todo lo que hay que saber de un cliente en UNA sola llamada: datos, procesos con su siguiente paso y bloqueos, alertas pendientes, últimos correos, última reunión y documentación que falta. Busca por nombre y/o apellido (o pasa clientId si ya lo tienes).',
+    properties: { nombre: { type: 'string', description: 'Nombre, apellido o ambos, tal como lo diga el humano' }, clientId: str },
+    run: (i) => clientBriefing(String(i.nombre ?? ''), i.clientId ? String(i.clientId) : undefined),
   },
 
   // ── Coordinación (portavoz): agenda, tareas del equipo, historial ─────
@@ -508,6 +520,10 @@ function toAnthropicTool(t: GestoriaTool): Anthropic.Tool {
   }
 }
 
+// Agente de llamadas: contesta rápido con un resumen del cliente (ver la
+// ruta de chat: modelo rápido, sin herramientas del PC).
+export const CALL_AGENT_ID = 't-call'
+
 // Qué área lleva cada agente del equipo (ids fijos de scripts/seed.ts).
 export const AGENT_AREAS: Record<string, GestoriaArea> = {
   't-pm': 'coordinacion',
@@ -517,6 +533,7 @@ export const AGENT_AREAS: Record<string, GestoriaArea> = {
   't-doc': 'documentos',
   't-hs': 'hubspot',
   't-mail': 'bandeja',
+  [CALL_AGENT_ID]: 'llamadas',
 }
 
 export const AREA_LABELS: Record<GestoriaArea, string> = {
@@ -527,6 +544,7 @@ export const AREA_LABELS: Record<GestoriaArea, string> = {
   documentos: 'documentación: registro, análisis KYC con IA, checklists y documentos redactados',
   hubspot: 'la integración con HubSpot: importaciones y sincronización',
   bandeja: 'la bandeja de entrada de Outlook: asignar correos a clientes o archivarlos',
+  llamadas: 'atender llamadas de clientes: resumir al momento cómo va cada cliente',
 }
 
 export function gestoriaToolsFor(agent: { id: string; isSpokesperson: boolean }): Anthropic.Tool[] {
@@ -554,7 +572,8 @@ export async function runGestoriaTool(toolName: string, input: Input): Promise<s
     return 'No ejecutado: esta acción necesita la confirmación explícita del humano. Explícale qué vas a hacer y espera su respuesta.'
   }
   try {
-    const req = tool.request(withoutKeys(input, ['confirmado']))
+    if (tool.run) return toToolText(await tool.run(input))
+    const req = tool.request!(withoutKeys(input, ['confirmado']))
     const res = await gestoriaFetch(req.method, req.path, req.body)
     if (!res.ok) return `Error ${res.status} de GestoriaAD: ${toToolText(res.data)}`
     let data = res.data

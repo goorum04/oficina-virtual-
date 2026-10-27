@@ -22,6 +22,7 @@ async function seed() {
       { id: 't-ale', name: 'Vera', role: 'Alertas y vencimientos', function: 'Vigila caducidades, apostillas y fechas límite; crea y revisa alertas.', avatar: '⏰', brain: 'claude-haiku', status: 'idle', projectId: team.id },
       { id: 't-doc', name: 'Dora', role: 'Documentación', function: 'Registro y estado de documentos, análisis KYC con IA, checklists de IE y documentos redactados.', avatar: '📄', brain: 'gemini-pro', status: 'idle', projectId: team.id },
       { id: 't-hs', name: 'Hugo', role: 'HubSpot', function: 'Importaciones de contactos y sincronización entre GestoriaAD y HubSpot.', avatar: '🔗', brain: 'gpt-4o', status: 'idle', projectId: team.id },
+      { id: 't-call', name: 'Rayo', role: 'Llamadas', function: 'Mientras hablas por teléfono con un cliente, te dice al momento cómo va: procesos, siguiente paso, alertas, qué falta y último contacto.', avatar: '⚡', brain: 'claude-haiku', status: 'idle', projectId: team.id },
       { id: 't-mail', name: 'Olga', role: 'Bandeja de entrada', function: 'Correos de Outlook sin cliente: los asigna al cliente que toca o los archiva.', avatar: '📬', brain: 'mistral', status: 'idle', projectId: team.id },
     ],
   })
