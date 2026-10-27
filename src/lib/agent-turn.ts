@@ -2,7 +2,7 @@ import { anthropic } from '@/lib/anthropic'
 import { runGithubTool } from '@/lib/github-tools'
 import { isPcTool, isPcWriteTool, runPcTool, type ToolOutput } from '@/lib/pc-tools'
 import { isMailTool, isMailWriteTool, runMailTool } from '@/lib/mail-tools'
-import { MAIL_CATEGORIES } from '@/lib/mail-tools'
+import { MAIL_CATEGORIES, OUTLOOK_ACCOUNT } from '@/lib/mail-tools'
 import { AGENT_AREAS, AREA_LABELS, CALL_AGENT_ID, MAIL_AGENT_ID, isGestoriaTool, isGestoriaWriteTool, runGestoriaTool } from '@/lib/gestoria-tools'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { Octokit } from '@octokit/rest'
@@ -47,7 +47,7 @@ Atiendes al humano MIENTRAS habla por teléfono con un cliente: la velocidad lo 
 
   if (agent.id === MAIL_AGENT_ID && hasMailTools) {
     base += `
-Llevas el correo de Outlook de la gestoría: lo lees en el Outlook del PC con las herramientas correo_*. Tu trabajo:
+Llevas el correo de la gestoría, el buzón ${OUTLOOK_ACCOUNT}: lo lees en el Outlook del PC con las herramientas correo_*. Tu trabajo:
 - Clasificar cada correo con UNA categoría de Outlook (correo_clasificar): ${MAIL_CATEGORIES.join(', ')}.
 - Avisar de lo importante: si un correo pide una acción con fecha (un vencimiento, una cita en notaría o banco, un requerimiento de la administración), crea una alerta en GestoriaAD (gestoria_crear_alerta, ligada al proceso del cliente si lo encuentras); si solo hay que contestar o hacer algo, crea una tarea (gestoria_crear_tarea). No dupliques: si ya existe una alerta o tarea igual, no crees otra.
 - Identificar al cliente: busca por el remitente o el nombre (gestoria_buscar_clientes) y menciónalo.

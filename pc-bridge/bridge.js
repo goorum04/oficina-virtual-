@@ -236,18 +236,35 @@ catch {
 }
 $ns = $ol.GetNamespace('MAPI')
 $inbox = $ns.GetDefaultFolder(6)
-# Bandejas de entrada de todas las cuentas configuradas en Outlook.
+# Bandejas de entrada de las cuentas de Outlook. Con BR_ACCOUNT solo la de
+# esa dirección (por su cuenta de envío o por el nombre del buzón).
 function AllInboxes {
   $list = @()
   foreach ($st in $ns.Stores) {
     try { $list += [pscustomobject]@{ cuenta = $st.DisplayName; folder = $st.GetDefaultFolder(6) } } catch {}
   }
   if (-not $list.Count) { $list += [pscustomobject]@{ cuenta = $inbox.Store.DisplayName; folder = $inbox } }
-  return $list
+  $want = [string]$env:BR_ACCOUNT
+  if (-not $want) { return $list }
+  foreach ($acc in $ns.Accounts) {
+    if ([string]$acc.SmtpAddress -ieq $want) {
+      try { return @([pscustomobject]@{ cuenta = $want; folder = $acc.DeliveryStore.GetDefaultFolder(6) }) } catch {}
+    }
+  }
+  $match = @($list | Where-Object { $_.cuenta -like ('*' + $want + '*') })
+  if ($match.Count) { return $match }
+  throw ('No encuentro la cuenta ' + $want + ' en Outlook. Cuentas disponibles: ' + (($list | ForEach-Object { $_.cuenta }) -join ', '))
 }
 function SenderSmtp($m) {
   try { if ($m.SenderEmailType -eq 'EX') { $u = $m.Sender.GetExchangeUser(); if ($u) { return $u.PrimarySmtpAddress } } } catch {}
   return $m.SenderEmailAddress
+}
+# Los ids que se dan a la oficina son "<buzón>|<correo>": fuera del buzón por
+# defecto, Outlook necesita los dos para encontrar el mensaje.
+function GetMail($id) {
+  $parts = ([string]$id) -split '\\|', 2
+  if ($parts.Count -eq 2) { return $ns.GetItemFromID($parts[1], $parts[0]) }
+  return $ns.GetItemFromID($parts[0])
 }
 function Clip($s, $n) {
   if ($null -eq $s) { return '' }
@@ -272,7 +289,7 @@ foreach ($ib in (AllInboxes)) {
       if ($m.ReceivedTime -lt $since) { break }
       if (-not $unreadOnly -or $m.UnRead) {
         [void]$out.Add([ordered]@{
-          id = $m.EntryID; cuenta = $ib.cuenta; de = $m.SenderName; email = (SenderSmtp $m); asunto = $m.Subject
+          id = ($ib.folder.StoreID + '|' + $m.EntryID); cuenta = $ib.cuenta; de = $m.SenderName; email = (SenderSmtp $m); asunto = $m.Subject
           recibido = $m.ReceivedTime.ToString('yyyy-MM-ddTHH:mm'); leido = (-not $m.UnRead)
           categorias = $m.Categories; adjuntos = $m.Attachments.Count; extracto = (Clip $m.Body 400)
         })
@@ -296,19 +313,19 @@ foreach ($ib in (AllInboxes)) {
 ConvertTo-Json -InputObject @($res) -Depth 3 -Compress
 `,
   mail_read: `
-$m = $ns.GetItemFromID($env:BR_ID)
+$m = GetMail $env:BR_ID
 $att = @()
 foreach ($a in $m.Attachments) { $att += $a.FileName }
 $body = [string]$m.Body
 if ($body.Length -gt 8000) { $body = $body.Substring(0, 8000) + '...' }
 ConvertTo-Json -Compress -Depth 3 -InputObject ([ordered]@{
-  id = $m.EntryID; de = $m.SenderName; email = (SenderSmtp $m); para = $m.To; cc = $m.CC
+  id = $env:BR_ID; de = $m.SenderName; email = (SenderSmtp $m); para = $m.To; cc = $m.CC
   asunto = $m.Subject; recibido = $m.ReceivedTime.ToString('yyyy-MM-ddTHH:mm')
   categorias = $m.Categories; adjuntos = $att; texto = $body
 })
 `,
   mail_categorize: `
-$m = $ns.GetItemFromID($env:BR_ID)
+$m = GetMail $env:BR_ID
 $cat = $env:BR_CAT
 $exists = $false
 foreach ($c in $ns.Categories) { if ($c.Name -eq $cat) { $exists = $true } }
@@ -320,7 +337,7 @@ $m.Save()
 ConvertTo-Json -Compress -InputObject ('Clasificado como ' + $cat + ': ' + $m.Subject)
 `,
   mail_move: `
-$m = $ns.GetItemFromID($env:BR_ID)
+$m = GetMail $env:BR_ID
 $f = $inbox
 try { $f = $m.Parent.Store.GetDefaultFolder(6) } catch {}
 foreach ($part in ($env:BR_FOLDER -split '[\\\\/]')) {
@@ -355,8 +372,9 @@ function runOutlook(kind, env) {
 }
 
 Object.assign(handlers, {
-  mail_list({ desde, max, soloNoLeidos }) {
+  mail_list({ desde, max, soloNoLeidos, cuenta }) {
     return runOutlook('mail_list', {
+      BR_ACCOUNT: cuenta ? String(cuenta) : '',
       BR_SINCE: desde ? String(desde) : '',
       BR_MAX: String(Math.min(Math.max(Number(max) || 20, 1), 50)),
       BR_UNREAD: soloNoLeidos ? '1' : '0',

@@ -10,6 +10,9 @@ import { MAIL_AGENT_ID } from '@/lib/gestoria-tools'
 // libres: no necesitan confirmación y la revisión automática puede usarlas
 // sola. Nunca envían ni borran correos.
 
+// Buzón de la gestoría que revisa Olga (en el Outlook del PC hay más cuentas).
+export const OUTLOOK_ACCOUNT = 'secretariat-and@epona-andorre.com'
+
 export const MAIL_CATEGORIES = [
   'Gestoría: Urgente',
   'Gestoría: Cliente',
@@ -24,7 +27,7 @@ const TOOLS: Array<Anthropic.Tool & { readOnly?: boolean }> = [
   {
     name: 'correo_listar',
     readOnly: true,
-    description: 'Lista los correos de las bandejas de entrada de todas las cuentas de Outlook (los más recientes primero): id, cuenta, remitente, asunto, fecha, si está leído, categorías y un extracto.',
+    description: `Lista los correos de la bandeja de entrada de ${OUTLOOK_ACCOUNT} en Outlook (los más recientes primero): id, remitente, asunto, fecha, si está leído, categorías y un extracto.`,
     input_schema: {
       type: 'object',
       properties: {
@@ -93,7 +96,7 @@ export async function runMailTool(name: string, input: Record<string, unknown>, 
   }
   try {
     // Outlook puede tardar en arrancar la primera vez.
-    const res = await runPcCommand(kind, { ...input, categoryPrefix: 'Gestoría: ' }, agentId, 90_000)
+    const res = await runPcCommand(kind, { ...input, cuenta: OUTLOOK_ACCOUNT, categoryPrefix: 'Gestoría: ' }, agentId, 90_000)
     return res.ok ? toToolText(res.data) : `Error en el PC: ${toToolText(res.data)}`
   } catch (err) {
     return `Error en ${name}: ${err instanceof Error ? err.message : 'desconocido'}`

@@ -1,7 +1,7 @@
 import { db } from '@/lib/db'
 import { officeProtected } from '@/lib/access'
 import { pcConfigured, runPcCommand } from '@/lib/pc'
-import { mailToolsFor } from '@/lib/mail-tools'
+import { OUTLOOK_ACCOUNT, mailToolsFor } from '@/lib/mail-tools'
 import { MAIL_AGENT_ID, gestoriaToolsFor } from '@/lib/gestoria-tools'
 import { runAgentTurn, systemPromptFor } from '@/lib/agent-turn'
 import { MODELS } from '@/lib/model-router'
@@ -37,8 +37,10 @@ export async function maybeReviewMail(): Promise<void> {
   if (last && Date.now() - last.createdAt.getTime() < REVIEW_EVERY_MS) return
 
   // "Desde cuándo" se arrastra de la última revisión que leyó bien el correo.
-  const prevMeta = last?.metadata ? (JSON.parse(last.metadata) as { since?: string; nextSince?: string }) : {}
-  const since = prevMeta.nextSince || prevMeta.since || new Date(Date.now() - FIRST_LOOKBACK_MS).toISOString()
+  // Si ha cambiado el buzón, se empieza de cero (últimas 24 h).
+  const prevMeta = last?.metadata ? (JSON.parse(last.metadata) as { since?: string; nextSince?: string; cuenta?: string }) : {}
+  const sameAccount = prevMeta.cuenta === OUTLOOK_ACCOUNT
+  const since = (sameAccount && (prevMeta.nextSince || prevMeta.since)) || new Date(Date.now() - FIRST_LOOKBACK_MS).toISOString()
   const startedAt = new Date()
 
   // Se anota antes de empezar: así la siguiente consulta del puente no lanza
@@ -47,15 +49,15 @@ export async function maybeReviewMail(): Promise<void> {
     data: {
       type: 'mail_review',
       message: `${agent.name} está revisando el correo`,
-      metadata: JSON.stringify({ since }),
+      metadata: JSON.stringify({ since, cuenta: OUTLOOK_ACCOUNT }),
       agentId: agent.id,
       projectId: agent.projectId,
     },
   })
   const finish = (message: string, nextSince?: string) =>
-    db.activityLog.update({ where: { id: log.id }, data: { message, metadata: JSON.stringify({ since, nextSince: nextSince ?? since }) } })
+    db.activityLog.update({ where: { id: log.id }, data: { message, metadata: JSON.stringify({ since, nextSince: nextSince ?? since, cuenta: OUTLOOK_ACCOUNT }) } })
 
-  const list = await runPcCommand('mail_list', { desde: since, max: 40 }, agent.id, 90_000)
+  const list = await runPcCommand('mail_list', { desde: since, max: 40, cuenta: OUTLOOK_ACCOUNT }, agent.id, 90_000)
   if (!list.ok) {
     await finish(`${agent.name} no pudo leer el correo: ${String(list.data).slice(0, 200)}`)
     return
