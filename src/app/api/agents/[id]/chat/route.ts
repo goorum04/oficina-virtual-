@@ -166,7 +166,7 @@ export async function POST(
     take: 15,
   })
   const tasksNote = openTasks.length
-    ? `\nTRABAJO EN CURSO: estas son tus tareas abiertas ahora mismo (asignadas en el repaso de clientes prioritarios). Si te preguntan qué haces o en qué trabajas, explícalas; aunque antes en la conversación dijeras otra cosa, esto es lo actual:\n${openTasks.map(t => `- ${t.title}${t.description ? ` (${t.description.replace(/\n/g, '; ').slice(0, 160)})` : ''}`).join('\n')}`
+    ? `[Contexto de la oficina, no lo repitas tal cual: tus tareas abiertas ahora mismo, asignadas en el repaso de clientes prioritarios. Es tu trabajo actual aunque antes en la conversación dijeras otra cosa:\n${openTasks.map(t => `- ${t.title}${t.description ? ` (${t.description.replace(/\n/g, '; ').slice(0, 160)})` : ''}`).join('\n')}]\n\n`
     : ''
   // El agente de llamadas no usa el PC: cada herramienta de más hace la
   // respuesta más lenta.
@@ -185,11 +185,14 @@ export async function POST(
   try {
     const { text, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens } = await runAgentTurn({
       model: MODELS[tier],
-      system: systemPromptFor(agent, teammates, gestoriaTools.length > 0, pcTools.length > 0, mailTools.length > 0) + tasksNote,
+      system: systemPromptFor(agent, teammates, gestoriaTools.length > 0, pcTools.length > 0, mailTools.length > 0),
       history: history.map(m => {
-        if (m.id === userMessage.id && attachments.length) {
+        // Las tareas van pegadas al mensaje actual: el modelo las tiene más
+        // en cuenta que al final de las instrucciones, y estas no cambian
+        // (mejor para la caché).
+        if (m.id === userMessage.id) {
           const blocks = attachmentContentBlocks(attachments)
-          if (m.content) blocks.push({ type: 'text', text: m.content })
+          blocks.push({ type: 'text', text: tasksNote + (m.content || '(archivo adjunto)') })
           return { role: 'user', content: blocks }
         }
         const placeholder = m.attachments.length
