@@ -11,6 +11,8 @@ import { NextResponse } from 'next/server'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { Octokit } from '@octokit/rest'
 
+const PC_HINTS = /\b(carpeta|archivo|fichero|documento|pdf|word|excel|pc|ordenador|onedrive|disco|ejecuta|comando|escritorio|descarga|sube|subir|adjunt)/i
+
 // Un turno puede encadenar varias órdenes al PC (un comando espera hasta 2 min).
 export const maxDuration = 300
 
@@ -155,9 +157,24 @@ export async function POST(
   }
 
   const gestoriaTools = gestoriaToolsFor(agent)
+
+  // Sus tareas abiertas en la oficina (p.ej. las de clientes prioritarios),
+  // para que sepa en qué está trabajando.
+  const openTasks = await db.task.findMany({
+    where: { agentId: id, status: { not: 'completed' } },
+    select: { title: true, description: true },
+    take: 15,
+  })
+  const tasksNote = openTasks.length
+    ? `\nTus tareas abiertas ahora mismo en la oficina:\n${openTasks.map(t => `- ${t.title}${t.description ? ` (${t.description.replace(/\n/g, '; ').slice(0, 160)})` : ''}`).join('\n')}`
+    : ''
   // El agente de llamadas no usa el PC: cada herramienta de más hace la
   // respuesta más lenta.
-  const pcTools = isCallAgent ? [] : pcToolsFor()
+  // Las fichas de las herramientas del PC son largas: solo se mandan cuando
+  // el mensaje (o lo último de la conversación) va de archivos o del PC.
+  const recentText = [message || '', ...history.slice(-3).map(m => m.content)].join(' ')
+  const wantsPc = attachments.length > 0 || PC_HINTS.test(recentText)
+  const pcTools = isCallAgent || !wantsPc ? [] : pcToolsFor()
   const mailTools = mailToolsFor(agent)
   const tools = [...gestoriaTools, ...mailTools, ...pcTools, ...(agent.githubRepo ? GITHUB_TOOLS : [])]
 
@@ -168,7 +185,7 @@ export async function POST(
   try {
     const { text, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens } = await runAgentTurn({
       model: MODELS[tier],
-      system: systemPromptFor(agent, teammates, gestoriaTools.length > 0, pcTools.length > 0, mailTools.length > 0),
+      system: systemPromptFor(agent, teammates, gestoriaTools.length > 0, pcTools.length > 0, mailTools.length > 0) + tasksNote,
       history: history.map(m => {
         if (m.id === userMessage.id && attachments.length) {
           const blocks = attachmentContentBlocks(attachments)
