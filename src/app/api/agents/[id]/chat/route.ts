@@ -139,7 +139,7 @@ export async function POST(
   const history = (await db.message.findMany({
     where: { agentId: id },
     orderBy: { createdAt: 'desc' },
-    take: isCallAgent ? 6 : 20,
+    take: isCallAgent ? 6 : 10,
     include: { attachments: { select: { filename: true } } },
   })).reverse()
 
@@ -163,10 +163,10 @@ export async function POST(
 
   await db.agent.update({ where: { id }, data: { status: 'thinking' } })
 
-  const tier = isCallAgent ? 'haiku' : pickModel(message || (attachments.length ? 'analiza este archivo' : ''), agent, tools.length > 0)
+  const tier = isCallAgent ? 'haiku' : pickModel(message || (attachments.length ? 'analiza este archivo' : ''), agent)
 
   try {
-    const { text, inputTokens, outputTokens } = await runAgentTurn({
+    const { text, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens } = await runAgentTurn({
       model: MODELS[tier],
       system: systemPromptFor(agent, teammates, gestoriaTools.length > 0, pcTools.length > 0, mailTools.length > 0),
       history: history.map(m => {
@@ -201,7 +201,7 @@ export async function POST(
       },
     })
 
-    const costUsd = calcCostUsd(tier, inputTokens, outputTokens)
+    const costUsd = calcCostUsd(tier, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
     const agentMessage = await db.message.create({
       data: { role: 'agent', content: text, model: tier, inputTokens, outputTokens, costUsd, agentId: id },
     })

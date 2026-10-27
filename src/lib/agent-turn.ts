@@ -94,21 +94,29 @@ export async function runAgentTurn(opts: {
   agentId: string
   maxTokens?: number
   maxSteps?: number
-}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
+}): Promise<{ text: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number }> {
   const messages: Anthropic.MessageParam[] = [...opts.history]
   let inputTokens = 0
   let outputTokens = 0
+  let cacheWriteTokens = 0
+  let cacheReadTokens = 0
+  // Instrucciones y fichas de herramientas son iguales en cada mensaje y en
+  // cada paso: se marcan para la caché (lectura al 10 % del precio).
+  const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }]
+  const tools = opts.tools?.map((t, i, all) => (i === all.length - 1 ? { ...t, cache_control: { type: 'ephemeral' as const } } : t))
 
   for (let i = 0; i < (opts.maxSteps ?? 10); i++) {
     const response = await anthropic.messages.create({
       model: opts.model,
       max_tokens: opts.maxTokens ?? 2048,
-      system: opts.system,
-      tools: opts.tools,
+      system,
+      tools,
       messages,
     })
     inputTokens += response.usage.input_tokens
     outputTokens += response.usage.output_tokens
+    cacheWriteTokens += response.usage.cache_creation_input_tokens ?? 0
+    cacheReadTokens += response.usage.cache_read_input_tokens ?? 0
 
     // Cortada por longitud a mitad de una tanda de herramientas: las llamadas
     // incompletas no se ejecutan y se le pide que siga en tandas pequeñas,
@@ -125,7 +133,7 @@ export async function runAgentTurn(opts: {
         .filter((b): b is Anthropic.TextBlock => b.type === 'text')
         .map(b => b.text)
         .join('\n') || '(sin respuesta)'
-      return { text, inputTokens, outputTokens }
+      return { text, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens }
     }
 
     messages.push({ role: 'assistant', content: response.content })
@@ -160,7 +168,7 @@ export async function runAgentTurn(opts: {
     messages.push({ role: 'user', content: toolResults })
   }
 
-  return { text: '(demasiados pasos de herramientas en esta petición, intenta algo más simple)', inputTokens, outputTokens }
+  return { text: '(demasiados pasos de herramientas en esta petición, intenta algo más simple)', inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens }
 }
 
 // Añade una nota del sistema como turno del usuario sin romper la
