@@ -524,6 +524,10 @@ function toAnthropicTool(t: GestoriaTool): Anthropic.Tool {
 // ruta de chat: modelo rápido, sin herramientas del PC).
 export const CALL_AGENT_ID = 't-call'
 
+// Agente de correo: lee el Outlook del PC (mail-tools.ts) y además lleva la
+// bandeja de correos sin cliente de GestoriaAD.
+export const MAIL_AGENT_ID = 't-mail'
+
 // Qué área lleva cada agente del equipo (ids fijos de scripts/seed.ts).
 export const AGENT_AREAS: Record<string, GestoriaArea> = {
   't-pm': 'coordinacion',
@@ -532,9 +536,15 @@ export const AGENT_AREAS: Record<string, GestoriaArea> = {
   't-ale': 'alertas',
   't-doc': 'documentos',
   't-hs': 'hubspot',
-  't-mail': 'bandeja',
+  [MAIL_AGENT_ID]: 'bandeja',
   [CALL_AGENT_ID]: 'llamadas',
 }
+
+// Para avisar de lo que llega por correo, el agente de correo crea alertas
+// y tareas (de otras áreas) y consulta lo que ya existe para no duplicar.
+const MAIL_AGENT_EXTRA_TOOLS = [
+  'gestoria_crear_alerta', 'gestoria_listar_alertas', 'gestoria_crear_tarea', 'gestoria_listar_tareas', 'gestoria_listar_procesos',
+]
 
 export const AREA_LABELS: Record<GestoriaArea, string> = {
   coordinacion: 'coordinación del equipo, agenda, tareas e historial de cambios',
@@ -543,7 +553,7 @@ export const AREA_LABELS: Record<GestoriaArea, string> = {
   alertas: 'alertas, vencimientos y caducidades',
   documentos: 'documentación: registro, análisis KYC con IA, checklists y documentos redactados',
   hubspot: 'la integración con HubSpot: importaciones y sincronización',
-  bandeja: 'la bandeja de entrada de Outlook: asignar correos a clientes o archivarlos',
+  bandeja: 'el correo de Outlook: revisarlo, clasificarlo y avisar de lo importante (y la bandeja de correos sin cliente de GestoriaAD)',
   llamadas: 'atender llamadas de clientes: resumir al momento cómo va cada cliente',
 }
 
@@ -552,7 +562,8 @@ export function gestoriaToolsFor(agent: { id: string; isSpokesperson: boolean })
   const area = AGENT_AREAS[agent.id]
   if (!area) return []
   return TOOLS
-    .filter((t) => t.area === 'comun' || t.area === area || (agent.isSpokesperson && t.readOnly))
+    .filter((t) => t.area === 'comun' || t.area === area || (agent.isSpokesperson && t.readOnly) ||
+      (area === 'bandeja' && MAIL_AGENT_EXTRA_TOOLS.includes(t.name)))
     .map(toAnthropicTool)
 }
 

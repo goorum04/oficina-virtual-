@@ -23,7 +23,7 @@ async function seed() {
       { id: 't-doc', name: 'Dora', role: 'Documentación', function: 'Registro y estado de documentos, análisis KYC con IA, checklists de IE y documentos redactados.', avatar: '📄', brain: 'gemini-pro', status: 'idle', projectId: team.id },
       { id: 't-hs', name: 'Hugo', role: 'HubSpot', function: 'Importaciones de contactos y sincronización entre GestoriaAD y HubSpot.', avatar: '🔗', brain: 'gpt-4o', status: 'idle', projectId: team.id },
       { id: 't-call', name: 'Rayo', role: 'Llamadas', function: 'Mientras hablas por teléfono con un cliente, te dice al momento cómo va: procesos, siguiente paso, alertas, qué falta y último contacto.', avatar: '⚡', brain: 'claude-haiku', status: 'idle', projectId: team.id },
-      { id: 't-mail', name: 'Olga', role: 'Bandeja de entrada', function: 'Correos de Outlook sin cliente: los asigna al cliente que toca o los archiva.', avatar: '📬', brain: 'mistral', status: 'idle', projectId: team.id },
+      { id: 't-mail', name: 'Olga', role: 'Correo Outlook', function: 'Revisa el Outlook del PC cada 20 minutos: clasifica los correos, crea alertas y tareas para lo importante y te avisa. También lleva los correos sin cliente de GestoriaAD.', avatar: '📬', brain: 'mistral', status: 'idle', projectId: team.id },
     ],
   })
 

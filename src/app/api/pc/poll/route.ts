@@ -1,8 +1,11 @@
 import { db } from '@/lib/db'
 import { bridgeAuthorized } from '@/lib/pc'
-import { NextResponse } from 'next/server'
+import { NextResponse, after } from 'next/server'
+import { maybeReviewMail } from '@/lib/mail-review'
 
-export const maxDuration = 60
+// La revisión automática del correo corre tras responder (after) y puede
+// durar unos minutos.
+export const maxDuration = 300
 
 const WAIT_MS = 20_000
 
@@ -19,6 +22,10 @@ export async function POST(req: Request) {
     create: { id: 'pc', lastSeen: now, hostname: hostname ?? null, platform: platform ?? null },
     update: { lastSeen: now, hostname: hostname ?? null, platform: platform ?? null },
   })
+
+  // El puente pregunta sin parar mientras el PC está encendido: se aprovecha
+  // como reloj para revisar el correo cada cierto tiempo (ver mail-review).
+  after(() => maybeReviewMail().catch((e) => console.error('[mail-review]', e)))
 
   const deadline = Date.now() + WAIT_MS
   while (true) {

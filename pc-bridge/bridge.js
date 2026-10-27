@@ -7,7 +7,7 @@
 const fs = require('fs')
 const os = require('os')
 const path = require('path')
-const { exec } = require('child_process')
+const { exec, execFile } = require('child_process')
 
 const MAX_READ_BYTES = 3 * 1024 * 1024 // la oficina (Vercel) no acepta respuestas de más de ~4,5 MB
 const MAX_TEXT_CHARS = 200_000
@@ -222,6 +222,137 @@ const handlers = {
   },
 }
 
+// ── Outlook de escritorio (COM) ───────────────────────────────────────────
+// Órdenes fijas de correo: el texto de cada script está aquí, los datos
+// (ids, fechas, carpeta) llegan por variables de entorno, así ninguna orden
+// puede colar un comando distinto. Nunca envían ni borran correos.
+const OUTLOOK_HEADER = `
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+try { $ol = [Runtime.InteropServices.Marshal]::GetActiveObject('Outlook.Application') }
+catch {
+  try { $ol = New-Object -ComObject Outlook.Application }
+  catch { throw 'No se pudo abrir Outlook. Hace falta el Outlook de escritorio clásico (el "nuevo Outlook" no permite automatizarlo).' }
+}
+$ns = $ol.GetNamespace('MAPI')
+$inbox = $ns.GetDefaultFolder(6)
+function SenderSmtp($m) {
+  try { if ($m.SenderEmailType -eq 'EX') { $u = $m.Sender.GetExchangeUser(); if ($u) { return $u.PrimarySmtpAddress } } } catch {}
+  return $m.SenderEmailAddress
+}
+function Clip($s, $n) {
+  if ($null -eq $s) { return '' }
+  $t = ($s -replace '\\s+', ' ').Trim()
+  if ($t.Length -gt $n) { return $t.Substring(0, $n) + '...' } else { return $t }
+}
+`
+
+const OUTLOOK_SCRIPTS = {
+  mail_list: `
+$since = if ($env:BR_SINCE) { [datetime]::Parse($env:BR_SINCE) } else { (Get-Date).AddDays(-2) }
+$max = [int]$env:BR_MAX
+$unreadOnly = $env:BR_UNREAD -eq '1'
+$items = $inbox.Items
+$items.Sort('[ReceivedTime]', $true)
+$out = New-Object System.Collections.ArrayList
+$m = $items.GetFirst()
+while ($m -ne $null -and $out.Count -lt $max) {
+  if ($m.Class -eq 43) {
+    if ($m.ReceivedTime -lt $since) { break }
+    if (-not $unreadOnly -or $m.UnRead) {
+      [void]$out.Add([ordered]@{
+        id = $m.EntryID; de = $m.SenderName; email = (SenderSmtp $m); asunto = $m.Subject
+        recibido = $m.ReceivedTime.ToString('yyyy-MM-ddTHH:mm'); leido = (-not $m.UnRead)
+        categorias = $m.Categories; adjuntos = $m.Attachments.Count; extracto = (Clip $m.Body 400)
+      })
+    }
+  }
+  $m = $items.GetNext()
+}
+ConvertTo-Json -InputObject @($out) -Depth 3 -Compress
+`,
+  mail_read: `
+$m = $ns.GetItemFromID($env:BR_ID)
+$att = @()
+foreach ($a in $m.Attachments) { $att += $a.FileName }
+$body = [string]$m.Body
+if ($body.Length -gt 8000) { $body = $body.Substring(0, 8000) + '...' }
+ConvertTo-Json -Compress -Depth 3 -InputObject ([ordered]@{
+  id = $m.EntryID; de = $m.SenderName; email = (SenderSmtp $m); para = $m.To; cc = $m.CC
+  asunto = $m.Subject; recibido = $m.ReceivedTime.ToString('yyyy-MM-ddTHH:mm')
+  categorias = $m.Categories; adjuntos = $att; texto = $body
+})
+`,
+  mail_categorize: `
+$m = $ns.GetItemFromID($env:BR_ID)
+$cat = $env:BR_CAT
+$exists = $false
+foreach ($c in $ns.Categories) { if ($c.Name -eq $cat) { $exists = $true } }
+if (-not $exists) { try { [void]$ns.Categories.Add($cat, [int]$env:BR_COLOR) } catch {} }
+$keep = @()
+if ($m.Categories) { $keep = @($m.Categories -split ',\\s*' | Where-Object { $_ -and -not $_.StartsWith($env:BR_PREFIX) }) }
+$m.Categories = (@($keep) + $cat) -join ', '
+$m.Save()
+ConvertTo-Json -Compress -InputObject ('Clasificado como ' + $cat + ': ' + $m.Subject)
+`,
+  mail_move: `
+$m = $ns.GetItemFromID($env:BR_ID)
+$f = $inbox
+foreach ($part in ($env:BR_FOLDER -split '[\\\\/]')) {
+  $name = $part.Trim()
+  if (-not $name) { continue }
+  $next = $null
+  foreach ($sf in $f.Folders) { if ($sf.Name -eq $name) { $next = $sf; break } }
+  if (-not $next) { $next = $f.Folders.Add($name) }
+  $f = $next
+}
+$subject = $m.Subject
+[void]$m.Move($f)
+ConvertTo-Json -Compress -InputObject ('Movido a ' + $f.FolderPath + ': ' + $subject)
+`,
+}
+
+// Colores de las categorías "Gestoría: …" en Outlook (OlCategoryColor).
+const CATEGORY_COLORS = { Urgente: 1, Cliente: 8, 'Banco/Notaría': 9, 'Administración': 6, Facturas: 4, Informativo: 5, Publicidad: 14 }
+
+function runOutlook(kind, env) {
+  if (process.platform !== 'win32') return Promise.reject(new Error('El correo solo funciona en Windows con Outlook de escritorio'))
+  const script = OUTLOOK_HEADER + OUTLOOK_SCRIPTS[kind]
+  const encoded = Buffer.from(script, 'utf16le').toString('base64')
+  return new Promise((resolve, reject) => {
+    execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+      { env: { ...process.env, ...env }, timeout: 80_000, maxBuffer: 10 * 1024 * 1024, windowsHide: true },
+      (err, stdout, stderr) => {
+        if (err) return reject(new Error(String(stderr || err.message).split('\n').filter((l) => l.trim()).slice(0, 3).join(' ')))
+        try { resolve(JSON.parse(String(stdout).trim() || 'null')) } catch { resolve(String(stdout).trim()) }
+      })
+  })
+}
+
+Object.assign(handlers, {
+  mail_list({ desde, max, soloNoLeidos }) {
+    return runOutlook('mail_list', {
+      BR_SINCE: desde ? String(desde) : '',
+      BR_MAX: String(Math.min(Math.max(Number(max) || 20, 1), 50)),
+      BR_UNREAD: soloNoLeidos ? '1' : '0',
+    })
+  },
+  mail_read({ id }) {
+    return runOutlook('mail_read', { BR_ID: String(id || '') })
+  },
+  mail_categorize({ id, categoria, categoryPrefix }) {
+    const short = String(categoria || '').replace(String(categoryPrefix || ''), '')
+    return runOutlook('mail_categorize', {
+      BR_ID: String(id || ''), BR_CAT: String(categoria || ''),
+      BR_PREFIX: String(categoryPrefix || 'Gestoría: '), BR_COLOR: String(CATEGORY_COLORS[short] || 0),
+    })
+  },
+  mail_move({ id, carpeta }) {
+    if (!String(carpeta || '').trim()) throw new Error('Falta la carpeta')
+    return runOutlook('mail_move', { BR_ID: String(id || ''), BR_FOLDER: String(carpeta) })
+  },
+})
+
 function describe(cmd) {
   const p = cmd.payload || {}
   switch (cmd.kind) {
@@ -229,6 +360,10 @@ function describe(cmd) {
     case 'move': return `${p.copy ? 'COPIAR' : 'MOVER'}: ${p.from} → ${p.to}`
     case 'search': return `BUSCAR "${p.name}" en ${p.path}`
     case 'info': return 'INFO del equipo'
+    case 'mail_list': return `CORREO: listar${p.desde ? ` desde ${p.desde}` : ''}`
+    case 'mail_read': return 'CORREO: leer un mensaje'
+    case 'mail_categorize': return `CORREO: clasificar como ${p.categoria}`
+    case 'mail_move': return `CORREO: mover a ${p.carpeta}`
     default: return `${cmd.kind.toUpperCase()}: ${p.path}`
   }
 }

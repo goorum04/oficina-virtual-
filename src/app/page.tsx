@@ -372,7 +372,7 @@ export default function VirtualOffice() {
 
   /* ---- 3D agents (ALL agents from all projects) ---- */
   const agents3D: Agent3D[] = allAgents.map(a => ({
-    id: a.id, name: a.name, role: a.role, avatar: a.avatar, brain: a.brain,
+    id: a.id, name: a.name, role: a.role, avatar: a.avatar, brain: a.brain, isSpokesperson: a.isSpokesperson,
     status: a.status, tasks: (a.tasks || []).map(t => ({ id: t.id, title: t.title, status: t.status, progress: t.progress, priority: t.priority })),
   }))
 

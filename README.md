@@ -18,13 +18,14 @@ API, cada uno en un área concreta:
 
 | Agente | Área |
 |--------|------|
-| Nova (portavoz) | Coordinación: reportes de toda la gestoría, agenda, tareas del equipo, historial |
+| Nova (portavoz) | Coordinación: reportes de toda la gestoría, agenda, tareas del equipo, historial. Trabaja en el despacho de dirección |
 | Clara | Clientes y KYC: altas, datos, documentación que falta, enlaces de subida |
 | Pau | Procesos: residencias, sociedades, IE y sus pasos |
 | Vera | Alertas, vencimientos y apostillas |
 | Dora | Documentación: registro, análisis KYC con IA, checklists IE |
 | Hugo | HubSpot: importaciones y sincronización |
-| Olga | Bandeja de entrada de Outlook |
+| Olga | Correo de Outlook (en el PC): cada 20 minutos lo revisa, lo clasifica con categorías "Gestoría: …" y crea alertas o tareas para lo importante |
+| Rayo | Llamadas: resumen de un cliente en segundos mientras hablas por teléfono |
 
 Las herramientas están en `src/lib/gestoria-tools.ts`. Borrar datos u
 operaciones masivas exigen que el humano lo confirme en el chat. Para
@@ -36,6 +37,16 @@ conectarlo:
 2. En la oficina, define `GESTORIA_URL`, `GESTORIA_USER` y `GESTORIA_PASSWORD`.
 3. `bun run db:push` y `bun run db:seed` para crear las tablas nuevas y el
    equipo (el seed borra el equipo anterior y sus chats).
+
+## Revisión automática del correo
+
+Mientras el puente del PC está abierto, cada vez que pregunta por órdenes
+la oficina comprueba si toca revisar el correo (cada 20 minutos, ver
+`src/lib/mail-review.ts`). Olga lee lo nuevo del Outlook de escritorio, lo
+clasifica, crea alertas/tareas en GestoriaAD y deja el resumen en su chat y
+en la actividad. En esas revisiones solo tiene herramientas de correo y de
+crear alertas/tareas; nunca envía ni borra correos. Necesita el Outlook de
+escritorio clásico (el "nuevo Outlook" no se puede automatizar).
 
 ## Acceso al PC
 
