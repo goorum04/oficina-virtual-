@@ -21,6 +21,15 @@ const cut = (s: unknown, n: number) => {
   return t.length > n ? `${t.slice(0, n)}…` : t || null
 }
 
+// Fechas ya traducidas a "vencida hace 22 días" / "vence en 5 días": el
+// modelo rápido se equivoca si tiene que hacer la resta él.
+function relative(d: string | null): string | null {
+  if (!d) return null
+  const days = Math.round((Date.parse(d) - Date.parse(new Date().toISOString().slice(0, 10))) / 86_400_000)
+  if (days === 0) return `${d} (hoy)`
+  return days < 0 ? `${d} (vencida hace ${-days} días)` : `${d} (vence en ${days} días)`
+}
+
 async function getJson(path: string): Promise<unknown> {
   const res = await gestoriaFetch('GET', path)
   if (!res.ok) throw new Error(`GestoriaAD respondió ${res.status} en ${path}`)
@@ -52,7 +61,7 @@ function groupAlerts(alerts: Row[]) {
       if (due && (!g.vence || due < g.vence)) g.vence = due
     }
   }
-  return [...groups.values()]
+  return [...groups.values()].map((g) => ({ ...g, vence: relative(g.vence) }))
 }
 
 export async function clientBriefing(query: string, clientId?: string): Promise<unknown> {
@@ -113,7 +122,7 @@ export async function clientBriefing(query: string, clientId?: string): Promise<
         titulo: p.title,
         tipo: p.type,
         estado: p.status,
-        fechaLimite: day(p.deadline),
+        fechaLimite: relative(day(p.deadline)),
         pasosHechos: `${steps.filter((s) => s.status === 'completado').length}/${steps.length}`,
         siguientePaso: steps.find((s) => s.status !== 'completado')?.title ?? null,
         pasosBloqueados: steps.filter((s) => s.status === 'bloqueado').map((s) => s.title),
