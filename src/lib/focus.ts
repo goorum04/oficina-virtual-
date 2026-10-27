@@ -18,10 +18,9 @@ export const FOCUS_CLIENTS: Array<{ name: string; clientId: string | null }> = [
   { name: 'William Belmonte', clientId: 'cmuh1be1f0000jq04tc2fzs1q' },
   { name: 'Seghir Bencheikh', clientId: 'cmtvn2bkj00eol504yniu8szy' },
   { name: 'Nicolas Hassa', clientId: 'cmtvn2bjm00dgl504vt6e8h9l' },
-  // No tiene ficha en GestoriaAD (solo carpeta en OneDrive y correos).
-  { name: 'Nicolas Bordeau', clientId: null },
+  { name: 'Nicolas Bordeau', clientId: 'cmvqrnp8b0000jm0773sgiw3p' },
   { name: 'Christopher Gonzalez', clientId: 'cmtvn2bmx00icl504ys8pxcfh' },
-  { name: 'David Douard', clientId: 'cmtvn2bhy00b0l504en2eb1x2' },
+  { name: 'Johanna Douar', clientId: 'cmvqrnpee0001jm07pbyzcufl' },
 ]
 
 const FOCUS_EVERY_MS = 4 * 3600_000
