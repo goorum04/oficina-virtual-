@@ -64,6 +64,7 @@ function loadConfig() {
   }
   cfg.officeUrl = cfg.officeUrl.replace(/\/+$/, '')
   cfg.allowCommands = cfg.allowCommands !== false
+  cfg.allowSendMail = cfg.allowSendMail === true
   cfg.roots = Array.isArray(cfg.roots) ? cfg.roots.map((r) => path.resolve(r)) : []
   return cfg
 }
@@ -276,6 +277,88 @@ function Clip($s, $n) {
 `
 
 const OUTLOOK_SCRIPTS = {
+  // Correos con un cliente en recibidos Y enviados (lo que nos manda y lo
+  // que le pedimos), buscando sus términos en remitente, destinatarios y asunto.
+  mail_search: `
+$terms = @(([string]$env:BR_TERMS).ToLower() -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$since = [datetime]::Parse($env:BR_SINCE)
+$max = [int]$env:BR_MAX
+$store = (AllInboxes)[0].folder.Store
+$out = New-Object System.Collections.ArrayList
+foreach ($fd in @(@{ n = 'recibido'; f = $store.GetDefaultFolder(6) }, @{ n = 'enviado'; f = $store.GetDefaultFolder(5) })) {
+  $items = $fd.f.Items
+  $items.Sort('[ReceivedTime]', $true)
+  $m = $items.GetFirst()
+  $scanned = 0
+  while ($m -ne $null -and $scanned -lt 4000) {
+    $scanned++
+    if ($m.Class -eq 43) {
+      if ($m.ReceivedTime -lt $since) { break }
+      $hay = ([string]$m.SenderEmailAddress + ' ' + [string]$m.SenderName + ' ' + [string]$m.To + ' ' + [string]$m.CC + ' ' + [string]$m.Subject).ToLower()
+      $hit = $false
+      foreach ($t in $terms) { if ($hay.Contains($t)) { $hit = $true } }
+      if ($hit) {
+        $att = @()
+        foreach ($a in $m.Attachments) { $att += $a.FileName }
+        [void]$out.Add([ordered]@{
+          id = $m.EntryID; carpeta = $fd.n; de = $m.SenderName; email = (SenderSmtp $m); para = $m.To
+          asunto = $m.Subject; fecha = $m.ReceivedTime.ToString('yyyy-MM-ddTHH:mm'); adjuntos = $att; extracto = (Clip $m.Body 700)
+        })
+      }
+    }
+    $m = $items.GetNext()
+  }
+}
+$sorted = @($out | Sort-Object { $_.fecha } -Descending | Select-Object -First $max)
+ConvertTo-Json -InputObject $sorted -Depth 4 -Compress
+`,
+  // Un adjunto de un correo, en base64 (máx. 3 MB): se guarda en temporal,
+  // se lee y se borra.
+  mail_attachment: `
+$m = GetMail $env:BR_ID
+$a = $m.Attachments.Item([int]$env:BR_INDEX)
+$tmp = Join-Path $env:TEMP ('oficina_' + [guid]::NewGuid().ToString('N') + '_' + ($a.FileName -replace '[\\\\/:*?"<>|]', '_'))
+$a.SaveAsFile($tmp)
+$bytes = [IO.File]::ReadAllBytes($tmp)
+Remove-Item $tmp -Force
+if ($bytes.Length -gt 3145728) { throw ('Adjunto demasiado grande: ' + $bytes.Length + ' bytes') }
+ConvertTo-Json -Compress -InputObject ([ordered]@{ name = $a.FileName; size = $bytes.Length; base64 = [Convert]::ToBase64String($bytes) })
+`,
+  // Respuesta enviada al remitente de un correo (no a todos), en el mismo
+  // hilo y con la firma de Outlook (.txt de %APPDATA%\Microsoft\Signatures).
+  // Solo si config.json lo permite ("allowSendMail").
+  mail_reply_send: `
+$orig = GetMail $env:BR_REPLY_ID
+$r = $orig.Reply()
+$sig = ''
+$dir = Join-Path $env:APPDATA 'Microsoft\\Signatures'
+if (Test-Path $dir) {
+  $files = @(Get-ChildItem $dir -Filter *.txt | Sort-Object LastWriteTime -Descending)
+  $pick = $files | Where-Object { $_.BaseName -like ('*' + ($env:BR_ACCOUNT -split '@')[0] + '*') } | Select-Object -First 1
+  if (-not $pick) { $pick = $files | Select-Object -First 1 }
+  if ($pick) { $sig = Get-Content $pick.FullName -Raw -Encoding Default }
+}
+$r.Body = $env:BR_BODY + $(if ($sig) { "\r\n\r\n" + $sig } else { '' }) + "\r\n\r\n" + $r.Body
+$r.Send()
+ConvertTo-Json -Compress -InputObject ('Respuesta enviada a ' + $orig.SenderName + ': ' + $orig.Subject)
+`,
+  // Borrador en Outlook (respuesta a un correo o nuevo). Solo se guarda en
+  // Borradores: nunca se envía.
+  mail_draft: `
+if ($env:BR_REPLY_ID) {
+  $orig = GetMail $env:BR_REPLY_ID
+  $d = $orig.ReplyAll()
+  $d.Body = $env:BR_BODY + "\r\n\r\n" + $d.Body
+} else {
+  $d = $ol.CreateItem(0)
+  foreach ($acc in $ns.Accounts) { if ([string]$acc.SmtpAddress -ieq $env:BR_ACCOUNT) { $d.SendUsingAccount = $acc } }
+  $d.To = $env:BR_TO
+  $d.Subject = $env:BR_SUBJECT
+  $d.Body = $env:BR_BODY
+}
+$d.Save()
+ConvertTo-Json -Compress -InputObject ('Borrador guardado en Outlook (sin enviar): ' + $d.Subject)
+`,
   mail_list: `
 $since = if ($env:BR_SINCE) { [datetime]::Parse($env:BR_SINCE) } else { (Get-Date).AddDays(-2) }
 $max = [int]$env:BR_MAX
@@ -374,6 +457,31 @@ function runOutlook(kind, env) {
 }
 
 Object.assign(handlers, {
+  mail_search({ terminos, desde, max, cuenta }) {
+    const terms = (Array.isArray(terminos) ? terminos : [terminos]).map((t) => String(t || '').trim()).filter((t) => t.length >= 3)
+    if (!terms.length) throw new Error('Faltan términos de búsqueda (apellido o email, mín. 3 letras)')
+    return runOutlook('mail_search', {
+      BR_ACCOUNT: cuenta ? String(cuenta) : '',
+      BR_TERMS: terms.join(','),
+      BR_SINCE: desde ? String(desde) : new Date(Date.now() - 180 * 86_400_000).toISOString(),
+      BR_MAX: String(Math.min(Math.max(Number(max) || 15, 1), 40)),
+    })
+  },
+  mail_attachment({ id, indice, cuenta }) {
+    return runOutlook('mail_attachment', { BR_ID: String(id || ''), BR_INDEX: String(Number(indice) || 1), BR_ACCOUNT: cuenta ? String(cuenta) : '' })
+  },
+  mail_reply_send({ responderA, texto, cuenta }) {
+    if (!cfg.allowSendMail) throw new Error('Este PC no permite enviar correos ("allowSendMail": false en config.json): se deja como borrador')
+    if (!responderA || !String(texto || '').trim()) throw new Error('Falta el correo al que responder o el texto')
+    return runOutlook('mail_reply_send', { BR_ACCOUNT: cuenta ? String(cuenta) : '', BR_REPLY_ID: String(responderA), BR_BODY: String(texto) })
+  },
+  mail_draft({ para, asunto, texto, responderA, cuenta }) {
+    if (!String(texto || '').trim()) throw new Error('El borrador está vacío')
+    return runOutlook('mail_draft', {
+      BR_ACCOUNT: cuenta ? String(cuenta) : '', BR_REPLY_ID: responderA ? String(responderA) : '',
+      BR_TO: String(para || ''), BR_SUBJECT: String(asunto || ''), BR_BODY: String(texto),
+    })
+  },
   mail_list({ desde, max, soloNoLeidos, cuenta }) {
     return runOutlook('mail_list', {
       BR_ACCOUNT: cuenta ? String(cuenta) : '',
@@ -411,6 +519,10 @@ function describe(cmd) {
     case 'mail_list': return `CORREO: listar${p.desde ? ` desde ${p.desde}` : ''}`
     case 'mail_read': return 'CORREO: leer un mensaje'
     case 'mail_accounts': return 'CORREO: ver cuentas de Outlook'
+    case 'mail_search': return `CORREO: buscar ${[].concat(p.terminos || []).join(', ')}`
+    case 'mail_attachment': return `CORREO: abrir adjunto ${p.indice || 1}`
+    case 'mail_reply_send': return 'CORREO: ENVIAR respuesta a un cliente'
+    case 'mail_draft': return `CORREO: guardar borrador "${p.asunto || 'respuesta'}" (sin enviar)`
     case 'mail_categorize': return `CORREO: clasificar como ${p.categoria}`
     case 'mail_move': return `CORREO: mover a ${p.carpeta}`
     default: return `${cmd.kind.toUpperCase()}: ${p.path}`
@@ -444,7 +556,7 @@ async function runCommand(cmd) {
 
 async function main() {
   log(`Puente conectado a ${cfg.officeUrl}`)
-  log(`Acceso: ${cfg.roots.length ? cfg.roots.join(', ') : 'todo el PC'} · comandos ${cfg.allowCommands ? 'PERMITIDOS' : 'desactivados'}`)
+  log(`Acceso: ${cfg.roots.length ? cfg.roots.join(', ') : 'todo el PC'} · comandos ${cfg.allowCommands ? 'PERMITIDOS' : 'desactivados'} · envío de respuestas ${cfg.allowSendMail ? 'PERMITIDO' : 'desactivado'}`)
   log('Deja esta ventana abierta mientras quieras que los agentes puedan usar el PC. Ctrl+C para cortar el acceso.')
   let failures = 0
   while (true) {

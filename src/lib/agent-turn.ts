@@ -7,6 +7,13 @@ import { AGENT_AREAS, AREA_LABELS, CALL_AGENT_ID, MAIL_AGENT_ID, isGestoriaTool,
 import type Anthropic from '@anthropic-ai/sdk'
 import type { Octokit } from '@octokit/rest'
 
+// Pone un expediente en la cola del gestor de caso (case-worker.ts).
+export const CASE_TOOL: Anthropic.Tool = {
+  name: 'oficina_avanzar_caso',
+  description: 'Encarga trabajar a fondo el expediente de un cliente: leer sus correos y adjuntos, redactar los documentos que ya se puedan hacer (business plan, cartas…), dejar borradores de respuesta y marcar pasos hechos. Tarda unos minutos y deja el informe en el chat de Nova. Úsalo cuando el humano pida avanzar, ponerse al día o trabajar un cliente.',
+  input_schema: { type: 'object', properties: { cliente: { type: 'string', description: 'Nombre y/o apellido del cliente' } }, required: ['cliente'] },
+}
+
 // Lo que hace un agente en un turno (instrucciones + bucle de herramientas),
 // compartido entre el chat y los trabajos automáticos (revisión del correo).
 
@@ -142,9 +149,13 @@ export async function runAgentTurn(opts: {
     for (const block of response.content) {
       if (block.type === 'tool_use') {
         let result: ToolOutput
-        if (isMailTool(block.name)) {
+        if (block.name === CASE_TOOL.name) {
+          // Import diferido: case-worker usa este mismo módulo.
+          const { enqueueCaseByName } = await import('@/lib/case-worker')
+          result = await enqueueCaseByName(String((block.input as { cliente?: string }).cliente || ''))
+        } else if (isMailTool(block.name)) {
           result = await runMailTool(block.name, block.input as Record<string, unknown>, opts.agentId)
-          if (isMailWriteTool(block.name) && !/^(Error|No ejecutado)/.test(result)) {
+          if (isMailWriteTool(block.name) && typeof result === 'string' && !/^(Error|No ejecutado)/.test(result)) {
             await opts.onWrite?.(block.name)
           }
         } else if (isPcTool(block.name)) {

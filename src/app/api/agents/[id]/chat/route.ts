@@ -4,7 +4,7 @@ import { GITHUB_TOOLS } from '@/lib/github-tools'
 import { pcToolsFor } from '@/lib/pc-tools'
 import { mailToolsFor } from '@/lib/mail-tools'
 import { CALL_AGENT_ID, gestoriaToolsFor } from '@/lib/gestoria-tools'
-import { runAgentTurn, systemPromptFor } from '@/lib/agent-turn'
+import { CASE_TOOL, runAgentTurn, systemPromptFor } from '@/lib/agent-turn'
 import { MODELS, pickModel } from '@/lib/model-router'
 import { calcCostUsd } from '@/lib/pricing'
 import { NextResponse } from 'next/server'
@@ -176,7 +176,11 @@ export async function POST(
   const wantsPc = attachments.length > 0 || PC_HINTS.test(recentText)
   const pcTools = isCallAgent || !wantsPc ? [] : pcToolsFor()
   const mailTools = mailToolsFor(agent)
-  const tools = [...gestoriaTools, ...mailTools, ...pcTools, ...(agent.githubRepo ? GITHUB_TOOLS : [])]
+  const tools = [
+    ...gestoriaTools, ...mailTools, ...pcTools,
+    ...(gestoriaTools.length && !isCallAgent ? [CASE_TOOL] : []),
+    ...(agent.githubRepo ? GITHUB_TOOLS : []),
+  ]
 
   await db.agent.update({ where: { id }, data: { status: 'thinking' } })
 

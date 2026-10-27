@@ -605,3 +605,10 @@ export async function runGestoriaTool(toolName: string, input: Input): Promise<s
     return `Error llamando a GestoriaAD (${toolName}): ${err instanceof Error ? err.message : 'desconocido'}`
   }
 }
+
+// Herramientas concretas por nombre (para el gestor de caso, que no es un
+// agente con área fija).
+export function gestoriaToolsByName(names: string[]): Anthropic.Tool[] {
+  if (!gestoriaConfigured() || !officeProtected()) return []
+  return TOOLS.filter((t) => names.includes(t.name)).map(toAnthropicTool)
+}

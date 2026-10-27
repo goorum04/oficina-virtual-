@@ -5,6 +5,9 @@ import { gestoriaConfigured, gestoriaFetch } from '@/lib/gestoria'
 import { clientBriefing } from '@/lib/client-briefing'
 import { MODELS } from '@/lib/model-router'
 import { calcCostUsd } from '@/lib/pricing'
+import { runPcCommand } from '@/lib/pc'
+import { OUTLOOK_ACCOUNT } from '@/lib/mail-tools'
+import { enqueueCase } from '@/lib/case-worker'
 
 // Clientes prioritarios: cada FOCUS_EVERY_MS (disparado por las consultas
 // del puente del PC, o a mano con POST /api/focus/run) se repasan en
@@ -179,7 +182,25 @@ Escribe para el humano un plan breve: por cada cliente, 2-3 líneas (estado, lo 
       data: { role: 'agent', content: text, model: 'haiku', inputTokens, outputTokens, costUsd: calcCostUsd('haiku', inputTokens, outputTokens), agentId: lead.id },
     })
 
-    const message = `${lead.name} repasó ${FOCUS_CLIENTS.length} clientes prioritarios: ${tasks.length} tareas repartidas al equipo`
+    // Expedientes con correos nuevos desde su último trabajo (o de los
+    // últimos 3 días si nunca se trabajó) → cola del gestor de caso.
+    const queued: string[] = []
+    for (const c of FOCUS_CLIENTS) {
+      if (!c.clientId) continue
+      const lastCase = await db.activityLog.findFirst({
+        where: { type: 'case_run', metadata: { contains: c.clientId } },
+        orderBy: { createdAt: 'desc' },
+      })
+      const since = lastCase?.createdAt ?? new Date(Date.now() - 3 * 86_400_000)
+      const surnameTerm = c.name.split(' ').slice(-1)[0].toLowerCase()
+      const found = await runPcCommand('mail_search', { terminos: [surnameTerm], desde: since.toISOString(), max: 3, cuenta: OUTLOOK_ACCOUNT }, lead.id, 90_000)
+      if (found.ok && Array.isArray(found.data) && found.data.length) {
+        await enqueueCase(c.clientId, c.name)
+        queued.push(c.name)
+      }
+    }
+
+    const message = `${lead.name} repasó ${FOCUS_CLIENTS.length} clientes prioritarios: ${tasks.length} tareas repartidas al equipo${queued.length ? `; expedientes con novedades en cola: ${queued.join(', ')}` : ''}`
     await db.activityLog.update({ where: { id: log.id }, data: { message } })
     return { ok: true, message }
   } catch (err) {

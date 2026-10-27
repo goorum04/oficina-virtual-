@@ -3,6 +3,7 @@ import { bridgeAuthorized } from '@/lib/pc'
 import { NextResponse, after } from 'next/server'
 import { maybeReviewMail } from '@/lib/mail-review'
 import { maybeRunFocus } from '@/lib/focus'
+import { maybeRunNextCase } from '@/lib/case-worker'
 
 // La revisión automática del correo corre tras responder (after) y puede
 // durar unos minutos.
@@ -28,6 +29,7 @@ export async function POST(req: Request) {
   // como reloj para revisar el correo cada cierto tiempo (ver mail-review).
   after(() => maybeReviewMail().catch((e) => console.error('[mail-review]', e)))
   after(() => maybeRunFocus().catch((e) => console.error('[focus]', e)))
+  after(() => maybeRunNextCase().catch((e) => console.error('[case]', e)))
 
   const deadline = Date.now() + WAIT_MS
   while (true) {

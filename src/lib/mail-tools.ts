@@ -3,6 +3,7 @@ import { toToolText } from '@/lib/gestoria'
 import { officeProtected } from '@/lib/access'
 import { pcConfigured, runPcCommand } from '@/lib/pc'
 import { MAIL_AGENT_ID } from '@/lib/gestoria-tools'
+import type { ToolOutput } from '@/lib/pc-tools'
 
 // Correo de Outlook leído en el propio PC a través del puente (órdenes
 // mail_* de pc-bridge, que usan el Outlook de escritorio). Son órdenes fijas
@@ -67,6 +68,44 @@ const TOOLS: Array<Anthropic.Tool & { readOnly?: boolean }> = [
       required: ['id', 'carpeta'],
     },
   },
+  {
+    name: 'correo_buscar',
+    readOnly: true,
+    description: 'Busca los correos con un cliente en RECIBIDOS y ENVIADOS (lo que nos ha mandado y lo que le hemos pedido), por apellido, nombre o email en remitente, destinatarios o asunto. Devuelve id, carpeta, fecha, asunto, adjuntos y extracto.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        terminos: { type: 'array', items: { type: 'string' }, description: 'Apellido, email o palabras clave (mín. 3 letras), p.ej. ["bencheikh", "ralte"]' },
+        desde: { type: 'string', description: 'Fecha ISO desde la que buscar (por defecto, últimos 6 meses)' },
+        max: { type: 'number', description: 'Máximo de correos (por defecto 15, tope 40)' },
+      },
+      required: ['terminos'],
+    },
+  },
+  {
+    name: 'correo_adjunto',
+    readOnly: true,
+    description: 'Abre un adjunto de un correo (PDF o imagen se ven directamente; máx. 3 MB). indice empieza en 1, en el orden de la lista "adjuntos".',
+    input_schema: {
+      type: 'object',
+      properties: { id: { type: 'string' }, indice: { type: 'number' } },
+      required: ['id', 'indice'],
+    },
+  },
+  {
+    name: 'correo_borrador',
+    description: 'Deja un BORRADOR en Outlook (nunca se envía; el humano lo revisa y lo manda). Con responderA (id de un correo) es una respuesta a todos en ese hilo; si no, un correo nuevo a "para".',
+    input_schema: {
+      type: 'object',
+      properties: {
+        responderA: { type: 'string', description: 'id del correo al que se responde' },
+        para: { type: 'string' },
+        asunto: { type: 'string' },
+        texto: { type: 'string', description: 'Texto completo del correo, en el idioma del cliente' },
+      },
+      required: ['texto'],
+    },
+  },
 ]
 
 export function mailToolsFor(agent: { id: string }): Anthropic.Tool[] {
@@ -82,13 +121,27 @@ export function isMailWriteTool(name: string): boolean {
   return TOOLS.some((t) => t.name === name && !t.readOnly)
 }
 
-export async function runMailTool(name: string, input: Record<string, unknown>, agentId: string): Promise<string> {
+const IMAGE_TYPES: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' }
+
+export async function runMailTool(name: string, input: Record<string, unknown>, agentId: string): Promise<ToolOutput> {
+  if (name === 'correo_adjunto') {
+    const res = await runPcCommand('mail_attachment', { ...input, cuenta: OUTLOOK_ACCOUNT }, agentId, 90_000)
+    if (!res.ok) return `Error en el PC: ${toToolText(res.data)}`
+    const file = res.data as { name: string; size: number; base64: string }
+    const ext = (file.name.match(/\.[^.]+$/)?.[0] || '').toLowerCase()
+    if (ext === '.pdf') return [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: file.base64 } }]
+    if (IMAGE_TYPES[ext]) return [{ type: 'image', source: { type: 'base64', media_type: IMAGE_TYPES[ext] as 'image/png', data: file.base64 } }]
+    if (['.txt', '.csv', '.md'].includes(ext)) return Buffer.from(file.base64, 'base64').toString('utf8').slice(0, 30_000)
+    return `Adjunto "${file.name}" (${file.size} bytes): formato que no se puede leer directamente (pídelo en PDF si hace falta).`
+  }
   const kind = {
     correo_listar: 'mail_list',
     correo_cuentas: 'mail_accounts',
     correo_leer: 'mail_read',
     correo_clasificar: 'mail_categorize',
     correo_mover: 'mail_move',
+    correo_buscar: 'mail_search',
+    correo_borrador: 'mail_draft',
   }[name]
   if (!kind) return `Herramienta desconocida: ${name}`
   if (name === 'correo_clasificar' && !MAIL_CATEGORIES.includes(String(input.categoria))) {
@@ -101,4 +154,13 @@ export async function runMailTool(name: string, input: Record<string, unknown>, 
   } catch (err) {
     return `Error en ${name}: ${err instanceof Error ? err.message : 'desconocido'}`
   }
+}
+
+// Para el gestor de caso (case-worker.ts): buscar, leer, abrir adjuntos y
+// dejar borradores; sin clasificar ni mover.
+export function caseMailTools(): Anthropic.Tool[] {
+  if (!pcConfigured()) return []
+  return TOOLS
+    .filter((t) => ['correo_buscar', 'correo_leer', 'correo_adjunto', 'correo_borrador'].includes(t.name))
+    .map(({ readOnly: _readOnly, ...tool }) => tool)
 }
