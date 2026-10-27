@@ -378,7 +378,7 @@ export default function VirtualOffice() {
 
   /* ---- Stats ---- */
   const workingCount = currentProject?.agents.filter(a => a.status === 'working').length || 0
-  const restingCount = allAgents.filter(a => a.status === 'idle').length || 0
+  const restingCount = allAgents.filter(a => a.status === 'idle' && !(a.tasks || []).some(t => t.status === 'in_progress')).length || 0
   const totalTasks = currentProject?.tasks.length || 0
   const completedTasks = currentProject?.tasks.filter(t => t.status === 'completed').length || 0
   const avgProgress = totalTasks > 0 ? Math.round(currentProject!.tasks.reduce((s, t) => s + t.progress, 0) / totalTasks) : 0

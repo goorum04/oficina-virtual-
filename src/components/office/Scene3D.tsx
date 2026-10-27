@@ -1991,7 +1991,9 @@ export default function OfficeScene({
           )}
           {staff.map((agent, i) => {
             const layout = deskLayout[i % deskLayout.length]
-            const isIdle = agent.status === 'idle'
+            // Con tareas en curso se queda en su mesa trabajando, aunque no esté
+            // respondiendo a nadie en este momento.
+            const isIdle = agent.status === 'idle' && !agent.tasks.some(t => t.status === 'in_progress')
 
             if (isIdle) {
               // Calculate which rest spot this idle agent gets — rotates
