@@ -303,6 +303,14 @@ const TOOLS: GestoriaTool[] = [
     description: 'Lista alertas (por defecto solo las no revisadas) con su cliente y proceso.',
     properties: { incluirRevisadas: { type: 'boolean' } },
     request: () => ({ method: 'GET', path: '/api/alerts' }),
+    shape: (d) => (d as Array<Record<string, unknown>>).map((a) => {
+      const p = a.process as { title?: string; client?: unknown } | null
+      return {
+        id: a.id, titulo: a.title, tipo: a.type, prioridad: a.priority,
+        vence: typeof a.dueDate === 'string' ? a.dueDate.slice(0, 10) : null,
+        revisada: a.isRead, cliente: clientName(p?.client), proceso: p?.title ?? null,
+      }
+    }),
   },
   {
     area: 'alertas',

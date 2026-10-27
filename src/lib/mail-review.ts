@@ -14,7 +14,7 @@ import { calcCostUsd } from '@/lib/pricing'
 // de archivos, comandos ni borrados.
 
 const REVIEW_EVERY_MS = 20 * 60_000
-const FIRST_LOOKBACK_MS = 24 * 3600_000
+const LOOKBACK_MS = 24 * 3600_000
 const MAX_MAILS_PER_REVIEW = 15
 
 const AUTO_GESTORIA_TOOLS = [
@@ -37,11 +37,10 @@ export async function maybeReviewMail(): Promise<void> {
   if (last && Date.now() - last.createdAt.getTime() < REVIEW_EVERY_MS) return
 
   // "Desde cuándo" se arrastra de la última revisión que leyó bien el correo.
-  // Si ha cambiado el buzón, se empieza de cero (últimas 24 h).
-  const prevMeta = last?.metadata ? (JSON.parse(last.metadata) as { since?: string; nextSince?: string; cuenta?: string }) : {}
-  const sameAccount = prevMeta.cuenta === OUTLOOK_ACCOUNT
-  const since = (sameAccount && (prevMeta.nextSince || prevMeta.since)) || new Date(Date.now() - FIRST_LOOKBACK_MS).toISOString()
-  const startedAt = new Date()
+  // Siempre las últimas 24 h, quedándose con lo que aún no tiene categoría
+  // "Gestoría: …": si una revisión falla o se queda a medias, lo que no
+  // clasificó vuelve a salir en la siguiente.
+  const since = new Date(Date.now() - LOOKBACK_MS).toISOString()
 
   // Se anota antes de empezar: así la siguiente consulta del puente no lanza
   // otra revisión mientras esta sigue en marcha.
@@ -54,22 +53,19 @@ export async function maybeReviewMail(): Promise<void> {
       projectId: agent.projectId,
     },
   })
-  const finish = (message: string, nextSince?: string) =>
-    db.activityLog.update({ where: { id: log.id }, data: { message, metadata: JSON.stringify({ since, nextSince: nextSince ?? since, cuenta: OUTLOOK_ACCOUNT }) } })
+  const finish = (message: string) =>
+    db.activityLog.update({ where: { id: log.id }, data: { message, metadata: JSON.stringify({ since, cuenta: OUTLOOK_ACCOUNT }) } })
 
   const list = await runPcCommand('mail_list', { desde: since, max: 40, cuenta: OUTLOOK_ACCOUNT }, agent.id, 90_000)
   if (!list.ok) {
     await finish(`${agent.name} no pudo leer el correo: ${String(list.data).slice(0, 200)}`)
     return
   }
-  // Un minuto de solape por si llega algo mientras se lista; lo ya
-  // clasificado se descarta igualmente.
-  const nextSince = new Date(startedAt.getTime() - 60_000).toISOString()
   const pending = ((Array.isArray(list.data) ? list.data : []) as Mail[])
     .filter((m) => !String(m.categorias || '').includes('Gestoría: '))
     .slice(0, MAX_MAILS_PER_REVIEW)
   if (!pending.length) {
-    await finish(`${agent.name} revisó el correo: nada nuevo`, nextSince)
+    await finish(`${agent.name} revisó el correo: nada nuevo`)
     return
   }
 
@@ -91,6 +87,8 @@ Termina con un resumen para el humano: primero lo urgente, una línea por correo
       history: [{ role: 'user', content: request }],
       tools,
       agentId: agent.id,
+      maxTokens: 8000,
+      maxSteps: 25,
     })
     await db.message.create({
       data: { role: 'user', content: `🔁 Revisión automática: ${pending.length} correo(s) nuevo(s)`, agentId: agent.id },
@@ -102,7 +100,7 @@ Termina con un resumen para el humano: primero lo urgente, una línea por correo
       },
     })
     const firstLine = text.split('\n').find((l) => l.trim())?.replace(/[*#]/g, '').trim() || ''
-    await finish(`${agent.name} revisó ${pending.length} correo(s): ${firstLine.slice(0, 160)}`, nextSince)
+    await finish(`${agent.name} revisó ${pending.length} correo(s): ${firstLine.slice(0, 160)}`)
     await db.agent.update({ where: { id: agent.id }, data: { status: 'idle' } })
   } catch (err) {
     await db.agent.update({ where: { id: agent.id }, data: { status: 'error' } })

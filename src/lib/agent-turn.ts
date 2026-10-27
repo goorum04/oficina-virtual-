@@ -92,21 +92,33 @@ export async function runAgentTurn(opts: {
   repo?: string
   onWrite?: (toolName: string) => Promise<void>
   agentId: string
+  maxTokens?: number
+  maxSteps?: number
 }): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
   const messages: Anthropic.MessageParam[] = [...opts.history]
   let inputTokens = 0
   let outputTokens = 0
 
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < (opts.maxSteps ?? 10); i++) {
     const response = await anthropic.messages.create({
       model: opts.model,
-      max_tokens: 2048,
+      max_tokens: opts.maxTokens ?? 2048,
       system: opts.system,
       tools: opts.tools,
       messages,
     })
     inputTokens += response.usage.input_tokens
     outputTokens += response.usage.output_tokens
+
+    // Cortada por longitud a mitad de una tanda de herramientas: las llamadas
+    // incompletas no se ejecutan y se le pide que siga en tandas pequeñas,
+    // en vez de dar por buena una respuesta a medias.
+    if (response.stop_reason === 'max_tokens') {
+      const text = response.content.filter((b): b is Anthropic.TextBlock => b.type === 'text' && !!b.text.trim())
+      if (text.length) messages.push({ role: 'assistant', content: text })
+      appendUserNote(messages, 'Tu respuesta anterior se cortó por longitud y no se ejecutó ninguna herramienta. Continúa, con como mucho 5 llamadas a herramientas por respuesta.')
+      continue
+    }
 
     if (response.stop_reason !== 'tool_use') {
       const text = response.content
@@ -149,4 +161,17 @@ export async function runAgentTurn(opts: {
   }
 
   return { text: '(demasiados pasos de herramientas en esta petición, intenta algo más simple)', inputTokens, outputTokens }
+}
+
+// Añade una nota del sistema como turno del usuario sin romper la
+// alternancia usuario/asistente que exige la API.
+function appendUserNote(messages: Anthropic.MessageParam[], note: string) {
+  const last = messages[messages.length - 1]
+  if (last?.role === 'user') {
+    const content = typeof last.content === 'string' ? [{ type: 'text' as const, text: last.content }] : [...last.content]
+    content.push({ type: 'text', text: note })
+    messages[messages.length - 1] = { role: 'user', content }
+  } else {
+    messages.push({ role: 'user', content: note })
+  }
 }
