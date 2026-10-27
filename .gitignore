@@ -58,3 +58,5 @@ server.log
 *.pid
 # Skills directory
 /skills/
+# ejecutable generado del puente del PC
+/pc-bridge/dist
