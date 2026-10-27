@@ -1,17 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { safeEqual } from '@/lib/safe-equal'
+import { configuredUsers } from '@/lib/access'
 
-// Los agentes pueden cambiar datos de GestoriaAD y controlar el PC de la
-// gestoría, así que toda la oficina (UI + API) va detrás de HTTP Basic
-// Auth, igual que GestoriaAD: APP_USERS="nico:clave1,maria:clave2".
-function configuredUsers(): Array<[string, string]> {
-  const users: Array<[string, string]> = []
-  for (const entry of (process.env.APP_USERS || '').split(',')) {
-    const i = entry.indexOf(':')
-    if (i > 0) users.push([entry.slice(0, i).trim(), entry.slice(i + 1).trim()])
-  }
-  return users
-}
+// Toda la oficina (UI + API) va detrás de HTTP Basic Auth, igual que
+// GestoriaAD, en cuanto APP_USERS está definido.
 
 // El puente del PC no es un navegador: se autentica con su propio token
 // (PC_BRIDGE_TOKEN) dentro de esas rutas.
@@ -43,14 +35,10 @@ export function proxy(request: NextRequest) {
   }
 
   const users = configuredUsers()
-  // Sin usuarios configurados, abierta solo en desarrollo local.
-  if (users.length === 0) {
-    if (process.env.NODE_ENV !== 'production') return NextResponse.next()
-    return new NextResponse(
-      'Acceso no configurado: define APP_USERS en las variables de entorno.',
-      { status: 503 },
-    )
-  }
+  // Sin usuarios configurados la oficina sigue abierta como siempre, pero
+  // los agentes no reciben herramientas de GestoriaAD ni del PC
+  // (officeProtected en lib/access.ts).
+  if (users.length === 0) return NextResponse.next()
 
   const authHeader = request.headers.get('authorization')
   if (authHeader?.startsWith('Basic ')) {

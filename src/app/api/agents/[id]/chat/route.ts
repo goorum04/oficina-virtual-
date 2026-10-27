@@ -106,7 +106,7 @@ Reglas:
 - Son datos personales (KYC): no los repitas más de lo necesario.`
   } else if (area) {
     base += `
-(La conexión con GestoriaAD no está configurada todavía en el servidor: faltan GESTORIA_URL, GESTORIA_USER y GESTORIA_PASSWORD. Si te piden datos de la gestoría, dilo.)`
+(La conexión con GestoriaAD no está activa todavía: el servidor necesita GESTORIA_URL, GESTORIA_USER, GESTORIA_PASSWORD y APP_USERS. Si te piden datos de la gestoría, dilo.)`
   }
 
   if (hasPcTools) {

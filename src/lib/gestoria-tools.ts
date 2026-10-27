@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { gestoriaConfigured, gestoriaFetch, toToolText } from '@/lib/gestoria'
+import { officeProtected } from '@/lib/access'
 
 // Herramientas con las que los agentes de la oficina gestionan GestoriaAD.
 // Cada agente se encarga de un área (ver AGENT_AREAS) y solo recibe las
@@ -529,7 +530,7 @@ export const AREA_LABELS: Record<GestoriaArea, string> = {
 }
 
 export function gestoriaToolsFor(agent: { id: string; isSpokesperson: boolean }): Anthropic.Tool[] {
-  if (!gestoriaConfigured()) return []
+  if (!gestoriaConfigured() || !officeProtected()) return []
   const area = AGENT_AREAS[agent.id]
   if (!area) return []
   return TOOLS

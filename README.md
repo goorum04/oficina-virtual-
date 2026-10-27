@@ -47,8 +47,9 @@ Borrar y ejecutar piden confirmación en el chat. Instalación en
 
 ## Acceso a la oficina
 
-La oficina entera pide usuario y contraseña (`APP_USERS`, igual que en
-GestoriaAD). En producción, sin `APP_USERS` no deja entrar a nadie.
+Con `APP_USERS` definido, la oficina entera pide usuario y contraseña
+(igual que GestoriaAD). Sin él sigue abierta, pero los agentes no reciben
+las herramientas de GestoriaAD ni del PC.
 
 ![Vista de la oficina virtual](docs/preview.png)
 

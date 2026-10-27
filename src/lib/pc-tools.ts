@@ -1,6 +1,7 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { gestoriaConfigured, gestoriaUpload, toToolText } from '@/lib/gestoria'
 import { bridgeStatus, pcConfigured, runPcCommand } from '@/lib/pc'
+import { officeProtected } from '@/lib/access'
 
 // Herramientas para controlar el PC de la gestoría a través del puente
 // (pc-bridge/). Las tienen todos los agentes en cuanto PC_BRIDGE_TOKEN está
@@ -90,7 +91,7 @@ function toAnthropicTool(t: PcTool): Anthropic.Tool {
 }
 
 export function pcToolsFor(): Anthropic.Tool[] {
-  if (!pcConfigured()) return []
+  if (!pcConfigured() || !officeProtected()) return []
   return TOOLS
     .filter((t) => t.name !== 'pc_subir_a_gestoria' || gestoriaConfigured())
     .map(toAnthropicTool)
