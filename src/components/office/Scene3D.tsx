@@ -13,13 +13,13 @@ export interface Agent3D {
 
 /* ═══════════════════ PALETTES ═════════════════ */
 const COLORS = [
-  { shirt: '#6366f1', pants: '#4338ca', hair: '#2d1b0e', skin: '#f4c7a3' },
-  { shirt: '#10b981', pants: '#047857', hair: '#1a1a2e', skin: '#e8b58a' },
-  { shirt: '#f43f5e', pants: '#be123c', hair: '#4a2c17', skin: '#d4956b' },
-  { shirt: '#0ea5e9', pants: '#0369a1', hair: '#8b4513', skin: '#fcd5b0' },
-  { shirt: '#a855f7', pants: '#7e22ce', hair: '#2c1810', skin: '#c07840' },
-  { shirt: '#f59e0b', pants: '#b45309', hair: '#1a1a2e', skin: '#fde8d0' },
-  { shirt: '#ec4899', pants: '#be185d', hair: '#3d2b1f', skin: '#e0b090' },
+  { shirt: '#1f2a44', pants: '#2b2f36', hair: '#2d1b0e', skin: '#f4c7a3' },
+  { shirt: '#e9edf2', pants: '#1f2a44', hair: '#1a1a2e', skin: '#e8b58a' },
+  { shirt: '#4b5563', pants: '#2b2f36', hair: '#4a2c17', skin: '#d4956b' },
+  { shirt: '#9fb3c8', pants: '#2b2f36', hair: '#8b4513', skin: '#fcd5b0' },
+  { shirt: '#ffffff', pants: '#374151', hair: '#2c1810', skin: '#c07840' },
+  { shirt: '#2e3b4e', pants: '#1f2937', hair: '#1a1a2e', skin: '#fde8d0' },
+  { shirt: '#cbd5e1', pants: '#1f2a44', hair: '#3d2b1f', skin: '#e0b090' },
 ]
 function getC(id: string) {
   let h = 0
@@ -62,162 +62,125 @@ const DESK_LAYOUT: { pos: [number, number, number]; chair: [number, number, numb
 // Despacho de dirección: entre la sala de descanso (x < -1.8) y la de
 // reuniones (x > 1), de z = 1.4 a 5.75.
 const EXEC_CENTER: [number, number, number] = [-0.4, 0, 3.6]
-const EXEC_DESK: [number, number, number] = [-0.4, 0, 3.4]
-const EXEC_CHAIR: [number, number, number] = [-0.4, 0, 4.3]
+// La portavoz se sienta al fondo (junto a la puerta) mirando hacia la cámara.
+const EXEC_DESK: [number, number, number] = [-0.4, 0, 3.0]
+const EXEC_CHAIR: [number, number, number] = [-0.4, 0, 2.15]
 
 /* ═══════════════════ FLOOR ═════════════════ */
+// Suelo como una maqueta: una losa con canto, madera clara y alfombras.
 function OfficeFloor() {
   return (
     <group>
-      {/* Base subfloor (dark) */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.04, 0]} receiveShadow>
-        <planeGeometry args={[22, 16]} />
-        <meshStandardMaterial color="#14161c" roughness={0.95} />
+      {/* Diorama base (visible edge) */}
+      <mesh position={[0, -0.25, 0.1]} receiveShadow>
+        <boxGeometry args={[15.8, 0.46, 11.7]} />
+        <meshStandardMaterial color="#e9e8e6" roughness={0.9} />
+      </mesh>
+      <mesh position={[0, -0.47, 0.1]}>
+        <boxGeometry args={[16.0, 0.04, 11.9]} />
+        <meshStandardMaterial color="#3d434a" roughness={0.9} />
       </mesh>
 
-      {/* Main office floor - warm oak */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, 0.1]} receiveShadow>
-        <planeGeometry args={[15.5, 11.5]} />
-        <meshStandardMaterial color="#6e5442" roughness={0.75} />
+      {/* Light oak floor */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.015, 0.1]} receiveShadow>
+        <planeGeometry args={[15.6, 11.5]} />
+        <meshStandardMaterial color="#d9d1c6" roughness={0.8} />
       </mesh>
-
-      {/* Wood planks - subtle seams */}
       {Array.from({ length: 46 }).map((_, i) => (
-        <mesh key={`plank${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.015, -5.4 + i * 0.25]}>
-          <planeGeometry args={[15.5, 0.012]} />
-          <meshStandardMaterial color="#5a4435" transparent opacity={0.6} />
-        </mesh>
-      ))}
-      {Array.from({ length: 46 }).map((_, i) => (
-        <mesh key={`pjoint${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[-7.5 + ((i * 3.7) % 15), -0.014, -5.28 + i * 0.25]}>
-          <planeGeometry args={[0.012, 0.24]} />
-          <meshStandardMaterial color="#5a4435" transparent opacity={0.6} />
+        <mesh key={`plank${i}`} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.012, -5.4 + i * 0.25]}>
+          <planeGeometry args={[15.6, 0.012]} />
+          <meshStandardMaterial color="#cbc2b6" transparent opacity={0.7} />
         </mesh>
       ))}
 
       {/* Walking aisle runner between rows */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.008, -1.1]} receiveShadow>
-        <planeGeometry args={[14, 1.0]} />
-        <meshStandardMaterial color="#3f5560" roughness={0.95} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.006, -1.1]} receiveShadow>
+        <planeGeometry args={[13.5, 0.95]} />
+        <meshStandardMaterial color="#5b636d" roughness={0.95} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.007, -1.1]}>
-        <planeGeometry args={[13.6, 0.7]} />
-        <meshStandardMaterial color="#4c6672" roughness={0.95} />
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.005, -1.1]}>
+        <planeGeometry args={[13.2, 0.7]} />
+        <meshStandardMaterial color="#6b737d" roughness={0.95} />
       </mesh>
 
-      {/* Per-desk area rugs */}
-      {DESK_LAYOUT.map(({ pos: [x, , z] }, i) => (
-        <group key={`rug${i}`}>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, -0.006, z + (z < -1 ? 0.35 : -0.35)]} receiveShadow>
-            <planeGeometry args={[2.2, 2.0]} />
-            <meshStandardMaterial color="#c9b79c" roughness={0.98} />
-          </mesh>
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, -0.005, z + (z < -1 ? 0.35 : -0.35)]}>
-            <planeGeometry args={[2.0, 1.8]} />
-            <meshStandardMaterial color="#d8c8ae" roughness={0.98} />
-          </mesh>
-        </group>
-      ))}
     </group>
   )
 }
 
 /* ═══════════════════ WALLS ═════════════════ */
+// Vista isométrica tipo maqueta: solo las dos paredes del fondo (atrás e
+// izquierda), bajas, para ver el interior; las de delante no existen.
+const WALL_H = 3
 function OfficeWalls() {
-  const accentWall = '#2f4858'
+  const wall = '#f5f5f3'
+  const trim = '#3d434a'
   return (
     <group>
-      {/* Back wall */}
-      <mesh position={[0, 2.5, -5.5]} receiveShadow>
-        <boxGeometry args={[16, 5, 0.15]} />
-        <meshStandardMaterial color={accentWall} roughness={0.9} />
+      {/* Back wall + left wall */}
+      <mesh position={[0, WALL_H / 2, -5.55]} receiveShadow castShadow>
+        <boxGeometry args={[15.6, WALL_H, 0.2]} />
+        <meshStandardMaterial color={wall} roughness={0.95} />
       </mesh>
-
-      {/* Left wall */}
-      <mesh position={[-7.75, 2.5, 0]} receiveShadow>
-        <boxGeometry args={[0.15, 5, 11]} />
-        <meshStandardMaterial color={accentWall} roughness={0.9} />
+      <mesh position={[-7.8, WALL_H / 2, 0.1]} receiveShadow castShadow>
+        <boxGeometry args={[0.2, WALL_H, 11.5]} />
+        <meshStandardMaterial color={wall} roughness={0.95} />
       </mesh>
-
-      {/* Right wall (partial) */}
-      <mesh position={[7.75, 2.5, -1.5]} receiveShadow>
-        <boxGeometry args={[0.15, 5, 8]} />
-        <meshStandardMaterial color={accentWall} roughness={0.9} />
-      </mesh>
-
-
+      {/* Sage accent band + wooden skirting */}
+      <mesh position={[0, 0.55, -5.44]}><boxGeometry args={[15.6, 1.1, 0.02]} /><meshStandardMaterial color="#e3e6e9" roughness={0.95} /></mesh>
+      <mesh position={[-7.69, 0.55, 0.1]}><boxGeometry args={[0.02, 1.1, 11.5]} /><meshStandardMaterial color="#e3e6e9" roughness={0.95} /></mesh>
+      <mesh position={[0, 0.06, -5.43]}><boxGeometry args={[15.6, 0.12, 0.04]} /><meshStandardMaterial color={trim} /></mesh>
+      <mesh position={[-7.68, 0.06, 0.1]}><boxGeometry args={[0.04, 0.12, 11.5]} /><meshStandardMaterial color={trim} /></mesh>
+      {/* Wall caps */}
+      <mesh position={[0, WALL_H + 0.02, -5.55]}><boxGeometry args={[15.6, 0.04, 0.22]} /><meshStandardMaterial color={trim} /></mesh>
+      <mesh position={[-7.8, WALL_H + 0.02, 0.1]}><boxGeometry args={[0.22, 0.04, 11.5]} /><meshStandardMaterial color={trim} /></mesh>
 
       {/* ---- Windows on back wall ---- */}
-      {[-4.5, -1.5, 1.5, 4.5].map((x, i) => (
+      {[-5, -2.6, 2.6, 5].map((x, i) => (
         <group key={`win${i}`}>
-          {/* Window frame */}
-          <mesh position={[x, 3.2, -5.4]}>
-            <boxGeometry args={[2.4, 2.2, 0.12]} />
-            <meshStandardMaterial color="#e9e4dc" />
+          <mesh position={[x, 1.85, -5.43]}>
+            <boxGeometry args={[1.9, 1.5, 0.06]} />
+            <meshStandardMaterial color="#3d434a" />
           </mesh>
-          {/* Glass - daylight */}
-          <mesh position={[x, 3.2, -5.32]}>
-            <planeGeometry args={[2.1, 1.9]} />
-            <meshStandardMaterial
-              color="#a9cbe6"
-              emissive="#7fb0d8"
-              emissiveIntensity={0.9}
-              transparent
-              opacity={0.9}
-            />
+          <mesh position={[x, 1.85, -5.39]}>
+            <planeGeometry args={[1.7, 1.3]} />
+            <meshStandardMaterial color="#bfe0f2" emissive="#cfe8f7" emissiveIntensity={0.6} />
           </mesh>
-          {/* Window cross frame */}
-          <mesh position={[x, 3.2, -5.3]}>
-            <boxGeometry args={[0.05, 1.9, 0.02]} />
-            <meshStandardMaterial color="#e9e4dc" />
-          </mesh>
-          <mesh position={[x, 3.2, -5.3]}>
-            <boxGeometry args={[2.1, 0.05, 0.02]} />
-            <meshStandardMaterial color="#e9e4dc" />
-          </mesh>
+          <mesh position={[x, 1.85, -5.38]}><boxGeometry args={[0.04, 1.3, 0.02]} /><meshStandardMaterial color="#3d434a" /></mesh>
+          <mesh position={[x, 1.85, -5.38]}><boxGeometry args={[1.7, 0.04, 0.02]} /><meshStandardMaterial color="#3d434a" /></mesh>
           {/* Sunlight patch on the floor */}
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x, 0.004, -4.7]}>
-            <planeGeometry args={[2.0, 1.1]} />
-            <meshBasicMaterial color="#fff1d6" transparent opacity={0.07} />
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[x + 0.3, 0.004, -4.6]}>
+            <planeGeometry args={[1.8, 1.2]} />
+            <meshBasicMaterial color="#fff6e0" transparent opacity={0.25} />
           </mesh>
         </group>
       ))}
 
-      {/* Wall caps (what you see from above) */}
-      <mesh position={[0, 5.01, -5.5]}><boxGeometry args={[16, 0.02, 0.16]} /><meshStandardMaterial color="#e9e4dc" /></mesh>
-      <mesh position={[-7.75, 5.01, 0]}><boxGeometry args={[0.16, 0.02, 11]} /><meshStandardMaterial color="#e9e4dc" /></mesh>
-      <mesh position={[7.75, 5.01, -1.5]}><boxGeometry args={[0.16, 0.02, 8]} /><meshStandardMaterial color="#e9e4dc" /></mesh>
-
-      {/* No ceiling — open top view */}
-
       {/* ---- Clock on left wall ---- */}
-      <group position={[-7.65, 3.2, -2]}>
+      <group position={[-7.68, 2.2, -2]}>
         <mesh rotation={[0, 0, Math.PI / 2]}>
-          <cylinderGeometry args={[0.45, 0.45, 0.06, 32]} />
-          <meshStandardMaterial color="#1a1a2e" />
+          <cylinderGeometry args={[0.32, 0.32, 0.05, 32]} />
+          <meshStandardMaterial color={trim} />
         </mesh>
-        <mesh position={[0.04, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
-          <circleGeometry args={[0.4, 32]} />
-          <meshStandardMaterial color="#f0f0f0" />
+        <mesh position={[0.03, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
+          <circleGeometry args={[0.28, 32]} />
+          <meshStandardMaterial color="#fffaf2" />
         </mesh>
       </group>
 
       {/* ---- Whiteboard on back wall ---- */}
-      <group position={[0, 2.8, -5.35]}>
+      <group position={[0, 1.8, -5.42]}>
         <mesh>
-          <boxGeometry args={[3, 1.8, 0.05]} />
-          <meshStandardMaterial color="#f5f5f0" roughness={0.3} />
+          <boxGeometry args={[2.2, 1.2, 0.04]} />
+          <meshStandardMaterial color="#ffffff" roughness={0.3} />
         </mesh>
-        {/* Whiteboard frame */}
         <mesh position={[0, 0, -0.01]}>
-          <boxGeometry args={[3.15, 1.95, 0.02]} />
-          <meshStandardMaterial color="#555" />
+          <boxGeometry args={[2.3, 1.3, 0.02]} />
+          <meshStandardMaterial color={trim} />
         </mesh>
-        {/* Fake content lines */}
-        {[0.3, 0, -0.3].map((y, i) => (
-          <mesh key={`wbl${i}`} position={[-0.8 + i * 0.3, y, 0.03]}>
-            <boxGeometry args={[0.8 + i * 0.2, 0.06, 0.001]} />
-            <meshStandardMaterial color={i === 0 ? '#e74c3c' : i === 1 ? '#3498db' : '#2ecc71'} />
+        {[0.25, 0, -0.25].map((y, i) => (
+          <mesh key={`wbl${i}`} position={[-0.5 + i * 0.2, y, 0.025]}>
+            <boxGeometry args={[0.6 + i * 0.15, 0.05, 0.001]} />
+            <meshStandardMaterial color={['#1f2a44', '#64748b', '#94a3b8'][i]} />
           </mesh>
         ))}
       </group>
@@ -231,11 +194,13 @@ function Desk({ position = [0, 0, 0], rotation = 0, status = 'idle' }: {
 }) {
   const sc = STATUS_COLOR[status] || '#71717a'
   const legH = 0.72
+  // La silla queda en el lado -z local de la mesa; el contenido va girado
+  // media vuelta para que pantalla y teclado miren hacia quien se sienta.
   return (
-    <group position={position} rotation={[0, rotation, 0]}>
+    <group position={position} rotation={[0, rotation + Math.PI, 0]}>
       {/* Desk top - light oak */}
       <RoundedBox args={[1.6, 0.05, 0.8]} radius={0.02} position={[0, legH + 0.025, 0]} castShadow receiveShadow>
-        <meshStandardMaterial color="#c49a6c" roughness={0.55} metalness={0.05} />
+        <meshStandardMaterial color="#f1f1ef" roughness={0.5} metalness={0.05} />
       </RoundedBox>
       {/* Small desk plant */}
       <group position={[-0.62, legH + 0.05, -0.22]}>
@@ -256,7 +221,7 @@ function Desk({ position = [0, 0, 0], rotation = 0, status = 'idle' }: {
       ].map(([x, y, z], i) => (
         <mesh key={`leg${i}`} position={[x, y, z]} castShadow>
           <cylinderGeometry args={[0.025, 0.025, legH, 8]} />
-          <meshStandardMaterial color="#e8e6e3" metalness={0.3} roughness={0.4} />
+          <meshStandardMaterial color="#2b2f36" metalness={0.5} roughness={0.4} />
         </mesh>
       ))}
 
@@ -346,11 +311,11 @@ function Chair({ position = [0, 0, 0], rotation = 0 }: {
     <group position={position} rotation={[0, rotation, 0]}>
       {/* Seat */}
       <RoundedBox args={[0.45, 0.06, 0.42]} radius={0.015} position={[0, 0.48, 0]} castShadow>
-        <meshStandardMaterial color="#34495e" roughness={0.85} />
+        <meshStandardMaterial color="#2b2f36" roughness={0.8} />
       </RoundedBox>
       {/* Backrest */}
       <RoundedBox args={[0.44, 0.5, 0.05]} radius={0.015} position={[0, 0.76, -0.18]} castShadow>
-        <meshStandardMaterial color="#34495e" roughness={0.85} />
+        <meshStandardMaterial color="#2b2f36" roughness={0.8} />
       </RoundedBox>
       {/* Center post */}
       <mesh position={[0, 0.3, 0]} castShadow>
@@ -704,8 +669,6 @@ function AgentCharacter({ agent, position, deskRotation = 0, onClick, scale = 1 
             </Float>
           )}
 
-          {/* ---- BRAIN ---- */}
-          <Brain3D brainId={agent.brain || 'claude-sonnet'} status={status} />
         </group>
 
         {/* ---- SHADOW on floor ---- */}
@@ -753,17 +716,17 @@ function Bookshelf({ position, rotation = 0 }: { position: [number, number, numb
     <group position={position} rotation={[0, rotation, 0]}>
       {/* Shelf frame */}
       <RoundedBox args={[0.8, 1.6, 0.3]} radius={0.01} castShadow>
-        <meshStandardMaterial color="#3e2a1a" roughness={0.8} />
+        <meshStandardMaterial color="#c49a6c" roughness={0.7} />
       </RoundedBox>
       {/* Inner dark */}
       <mesh position={[0, 0, 0.08]}>
         <boxGeometry args={[0.7, 1.5, 0.01]} />
-        <meshStandardMaterial color="#1a1208" />
+        <meshStandardMaterial color="#8a6a4f" />
       </mesh>
       {/* Shelf boards */}
       {[-0.5, -0.15, 0.2, 0.55].map((y, i) => (
         <RoundedBox key={i} args={[0.72, 0.02, 0.28]} radius={0.005} position={[0, y, 0]}>
-          <meshStandardMaterial color="#4a3422" roughness={0.8} />
+          <meshStandardMaterial color="#b38a5f" roughness={0.8} />
         </RoundedBox>
       ))}
       {/* Books */}
@@ -841,7 +804,7 @@ function AgentFloorZone({ agent, position, onClick }: {
         rotation={[-Math.PI / 2, 0, 0]}
         position={[0, 0.02, 0]}
       >
-        <ringGeometry args={[0.8, 1.0, 48]} />
+        <ringGeometry args={[0.92, 0.98, 64]} />
         <meshBasicMaterial
           color={sc}
           transparent
@@ -855,7 +818,7 @@ function AgentFloorZone({ agent, position, onClick }: {
         <meshBasicMaterial
           color={sc}
           transparent
-          opacity={0.2}
+          opacity={0}
           side={THREE.DoubleSide}
         />
       </mesh>
@@ -871,12 +834,12 @@ function AgentFloorZone({ agent, position, onClick }: {
         <meshBasicMaterial
           color={c.shirt}
           transparent
-          opacity={0.4}
+          opacity={0}
           side={THREE.DoubleSide}
         />
       </mesh>
       {/* Status point light */}
-      <pointLight position={[0, 0.5, 0]} intensity={0.6} color={sc} distance={3} decay={2} />
+
     </group>
   )
 }
@@ -891,7 +854,7 @@ function AvatarMarker({ agent, position, onClick }: {
 
   useFrame((state) => {
     if (groupRef.current) {
-      groupRef.current.position.y = 1.45 + Math.sin(state.clock.elapsedTime * 1.5) * 0.04
+      groupRef.current.position.y = 1.9 + Math.sin(state.clock.elapsedTime * 1.5) * 0.04
     }
   })
 
@@ -906,7 +869,7 @@ function AvatarMarker({ agent, position, onClick }: {
       {/* Colored disc / token */}
       <mesh castShadow>
         <cylinderGeometry args={[0.2, 0.2, 0.08, 24]} />
-        <meshBasicMaterial color={c.shirt} />
+        <meshBasicMaterial color="#1f2937" />
       </mesh>
       {/* Status ring around disc */}
       <mesh position={[0, 0.045, 0]} rotation={[-Math.PI / 2, 0, 0]}>
@@ -944,14 +907,14 @@ function Workstation({ agent, deskPos, chairPos, rotation, onClick }: {
     0,
     (deskPos[2] + chairPos[2]) / 2,
   ]
-  const markerPos: [number, number, number] = [chairPos[0], 1.45, chairPos[2]]
+  const markerPos: [number, number, number] = [chairPos[0], 1.9, chairPos[2]]
   return (
     <group>
       <AgentFloorZone agent={agent} position={zonePos} onClick={onClick} />
       <AvatarMarker agent={agent} position={markerPos} onClick={onClick} />
       <Desk position={deskPos} rotation={rotation} status={agent.status} />
       <Chair position={chairPos} rotation={rotation} />
-      <AgentCharacter agent={agent} position={[chairPos[0], 0, chairPos[2]]} deskRotation={rotation} onClick={onClick} scale={1.15} />
+      <AgentCharacter agent={agent} position={[chairPos[0], 0, chairPos[2]]} deskRotation={rotation} onClick={onClick} scale={1.35} />
     </group>
   )
 }
@@ -1008,7 +971,7 @@ function ExecutiveDesk({ position, rotation = 0, status = 'idle' }: {
       ))}
       {/* Two monitors */}
       {[-0.38, 0.38].map((x, i) => (
-        <group key={`em${i}`} position={[x, h + 0.3, -0.25]} rotation={[-0.3, i === 0 ? 0.15 : -0.15, 0]}>
+        <group key={`em${i}`} position={[x, h + 0.3, 0.22]} rotation={[-0.3, Math.PI + (i === 0 ? -0.15 : 0.15), 0]}>
           <RoundedBox args={[0.7, 0.42, 0.025]} radius={0.015} castShadow>
             <meshStandardMaterial color="#111" roughness={0.5} />
           </RoundedBox>
@@ -1022,16 +985,16 @@ function ExecutiveDesk({ position, rotation = 0, status = 'idle' }: {
       <group position={[0.85, h + 0.04, -0.3]}>
         <mesh><cylinderGeometry args={[0.07, 0.08, 0.02, 16]} /><meshStandardMaterial color="#c9a227" metalness={0.9} roughness={0.25} /></mesh>
         <mesh position={[0, 0.2, 0]}><cylinderGeometry args={[0.01, 0.01, 0.4, 8]} /><meshStandardMaterial color="#c9a227" metalness={0.9} roughness={0.25} /></mesh>
-        <mesh position={[0, 0.42, 0.05]} rotation={[0.5, 0, 0]}><coneGeometry args={[0.09, 0.1, 16, 1, true]} /><meshStandardMaterial color="#1f4d3a" side={THREE.DoubleSide} /></mesh>
+        <mesh position={[0, 0.42, 0.05]} rotation={[0.5, 0, 0]}><coneGeometry args={[0.09, 0.1, 16, 1, true]} /><meshStandardMaterial color="#1f2937" side={THREE.DoubleSide} /></mesh>
         <pointLight position={[0, 0.35, 0.1]} intensity={0.5} color="#ffd9a0" distance={2} decay={2} />
       </group>
       {/* Keyboard, notebook, pen, nameplate */}
-      <RoundedBox args={[0.4, 0.012, 0.13]} radius={0.005} position={[0, h + 0.045, 0.1]}>
+      <RoundedBox args={[0.4, 0.012, 0.13]} radius={0.005} position={[0, h + 0.045, -0.15]}>
         <meshStandardMaterial color="#222" roughness={0.8} />
       </RoundedBox>
-      <mesh position={[-0.6, h + 0.045, 0.15]} rotation={[0, 0.2, 0]}>
+      <mesh position={[-0.6, h + 0.045, -0.15]} rotation={[0, 0.2, 0]}>
         <boxGeometry args={[0.22, 0.015, 0.3]} />
-        <meshStandardMaterial color="#7a1f2b" roughness={0.7} />
+        <meshStandardMaterial color="#1f2937" roughness={0.7} />
       </mesh>
       <mesh position={[0, h + 0.07, 0.42]} rotation={[-0.4, 0, 0]}>
         <boxGeometry args={[0.4, 0.07, 0.015]} />
@@ -1079,10 +1042,10 @@ function GuestChair({ position, rotation = 0 }: { position: [number, number, num
   return (
     <group position={position} rotation={[0, rotation, 0]}>
       <RoundedBox args={[0.5, 0.12, 0.48]} radius={0.04} position={[0, 0.42, 0]} castShadow>
-        <meshStandardMaterial color="#2f5d50" roughness={0.8} />
+        <meshStandardMaterial color="#2b2f36" roughness={0.7} />
       </RoundedBox>
       <RoundedBox args={[0.5, 0.42, 0.08]} radius={0.04} position={[0, 0.68, -0.2]} castShadow>
-        <meshStandardMaterial color="#2f5d50" roughness={0.8} />
+        <meshStandardMaterial color="#2b2f36" roughness={0.7} />
       </RoundedBox>
       {[[-0.2, -0.18], [0.2, -0.18], [-0.2, 0.18], [0.2, 0.18]].map(([x, z], i) => (
         <mesh key={i} position={[x, 0.18, z]}>
@@ -1111,13 +1074,13 @@ function ExecutiveOffice({ leadName }: { leadName?: string }) {
           <meshStandardMaterial color="#6e4f37" transparent opacity={0.7} />
         </mesh>
       ))}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.009, cz - 0.3]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.009, cz - 0.2]}>
         <planeGeometry args={[2.3, 2.6]} />
         <meshStandardMaterial color="#c9a227" roughness={0.6} metalness={0.3} />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.01, cz - 0.3]}>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[cx, 0.01, cz - 0.2]}>
         <planeGeometry args={[2.2, 2.5]} />
-        <meshStandardMaterial color="#6b2737" roughness={0.95} />
+        <meshStandardMaterial color="#1f2a44" roughness={0.95} />
       </mesh>
 
       {/* Front glass partition with a door gap + brass frame */}
@@ -1127,24 +1090,17 @@ function ExecutiveOffice({ leadName }: { leadName?: string }) {
       {[cx - 1.4, cx - 0.32, cx + 0.72, cx + 1.4].map((x) => (
         <mesh key={x} position={[x, 1.5, 1.45]}><boxGeometry args={[0.06, 3, 0.08]} />{brass}</mesh>
       ))}
-      {/* Back wall: wood panelling */}
-      <mesh position={[cx, 1.5, 5.75]} castShadow><boxGeometry args={[2.8, 3, 0.1]} /><meshStandardMaterial color="#4a2f21" roughness={0.6} /></mesh>
-      {[-1, -0.5, 0, 0.5, 1].map((dx) => (
-        <mesh key={dx} position={[cx + dx, 1.5, 5.69]}><boxGeometry args={[0.02, 3, 0.02]} /><meshStandardMaterial color="#3a2419" /></mesh>
-      ))}
-      <mesh position={[cx, 3.01, 5.75]}><boxGeometry args={[2.8, 0.02, 0.12]} />{brass}</mesh>
-
       {/* Furniture */}
-      <Bookshelf position={[cx - 0.85, 0.8, 5.5]} rotation={Math.PI} />
-      <Bookshelf position={[cx + 0.85, 0.8, 5.5]} rotation={Math.PI} />
-      <FloorPlant position={[cx + 1.1, 0, 4.9]} scale={1.1} />
-      <FloorPlant position={[cx - 1.1, 0, 1.85]} scale={0.8} />
-      <GuestChair position={[cx - 0.45, 0, 2.3]} rotation={0} />
-      <GuestChair position={[cx + 0.45, 0, 2.3]} rotation={0} />
+      <Bookshelf position={[cx - 1.2, 0.8, 2.4]} rotation={Math.PI / 2} />
+      <Bookshelf position={[cx - 1.2, 0.8, 3.4]} rotation={Math.PI / 2} />
+      <FloorPlant position={[cx + 1.05, 0, 1.9]} scale={0.9} />
+      <FloorPlant position={[cx - 1.05, 0, 5.3]} scale={0.8} />
+      <GuestChair position={[cx - 0.45, 0, 4.15]} rotation={Math.PI} />
+      <GuestChair position={[cx + 0.45, 0, 4.15]} rotation={Math.PI} />
 
       {/* Warm light + label */}
       <pointLight position={[cx, 2.6, cz]} intensity={1.1} color="#ffd9a0" distance={5} decay={1.6} />
-      <Text position={[cx, 0.02, 1.75]} fontSize={0.13} color="#e6c66a" anchorX="center" anchorY="middle" rotation={[-Math.PI / 2, 0, 0]}>
+      <Text position={[cx, 0.02, 5.4]} fontSize={0.13} color="#e6c66a" anchorX="center" anchorY="middle" rotation={[-Math.PI / 2, 0, 0]}>
         {leadName ? `DIRECCIÓN · ${leadName.toUpperCase()}` : 'DIRECCIÓN'}
       </Text>
     </group>
@@ -1155,10 +1111,10 @@ function ExecutiveWorkstation({ agent, onClick }: { agent: Agent3D; onClick?: ()
   return (
     <group>
       <AgentFloorZone agent={agent} position={[EXEC_CHAIR[0], 0, (EXEC_DESK[2] + EXEC_CHAIR[2]) / 2]} onClick={onClick} />
-      <AvatarMarker agent={agent} position={[EXEC_CHAIR[0], 1.45, EXEC_CHAIR[2]]} onClick={onClick} />
-      <ExecutiveDesk position={EXEC_DESK} rotation={Math.PI} status={agent.status} />
-      <ExecutiveChair position={EXEC_CHAIR} rotation={Math.PI} />
-      <AgentCharacter agent={agent} position={[EXEC_CHAIR[0], 0, EXEC_CHAIR[2]]} deskRotation={Math.PI} onClick={onClick} scale={1.2} />
+      <AvatarMarker agent={agent} position={[EXEC_CHAIR[0], 1.9, EXEC_CHAIR[2]]} onClick={onClick} />
+      <ExecutiveDesk position={EXEC_DESK} rotation={0} status={agent.status} />
+      <ExecutiveChair position={EXEC_CHAIR} rotation={0} />
+      <AgentCharacter agent={agent} position={[EXEC_CHAIR[0], 0, EXEC_CHAIR[2]]} deskRotation={0} onClick={onClick} scale={1.4} />
     </group>
   )
 }
@@ -1170,53 +1126,34 @@ function MeetingRoom() {
       {/* Meeting room floor - slightly warmer carpet */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[4, 0.005, 3]} receiveShadow>
         <planeGeometry args={[6.5, 5.5]} />
-        <meshStandardMaterial color="#4b5a63" roughness={0.9} />
+        <meshStandardMaterial color="#dfe5ea" roughness={0.9} />
       </mesh>
       {/* Area rug under table */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[4, 0.008, 3]}>
         <planeGeometry args={[5, 3.5]} />
-        <meshStandardMaterial color="#5c6e78" roughness={0.95} />
+        <meshStandardMaterial color="#c9cdd2" roughness={0.95} />
       </mesh>
 
       {/* ─── GLASS WALLS ─── */}
       {/* Left glass partition */}
       <mesh position={[1.0, 1.5, 3]}>
         <boxGeometry args={[0.06, 3, 5.5]} />
-        <meshStandardMaterial color="#88aacc" transparent opacity={0.1} roughness={0.05} metalness={0.4} />
+        <meshStandardMaterial color="#cfe3ee" transparent opacity={0.14} roughness={0.05} metalness={0.4} />
       </mesh>
       {/* Left frame - top beam */}
       <mesh position={[1.0, 3, 3]}>
         <boxGeometry args={[0.08, 0.06, 5.5]} />
-        <meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} />
+        <meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} />
       </mesh>
       {/* Left frame - verticals */}
-      <mesh position={[1.0, 1.5, 0.25]}><boxGeometry args={[0.08, 3, 0.06]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
-      <mesh position={[1.0, 1.5, 5.75]}><boxGeometry args={[0.08, 3, 0.06]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
+      <mesh position={[1.0, 1.5, 0.25]}><boxGeometry args={[0.08, 3, 0.06]} /><meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} /></mesh>
+      <mesh position={[1.0, 1.5, 5.75]}><boxGeometry args={[0.08, 3, 0.06]} /><meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} /></mesh>
       {/* Left frame - mid horizontal */}
-      <mesh position={[1.0, 1.5, 3]}><boxGeometry args={[0.08, 0.04, 5.5]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} transparent opacity={0.3} /></mesh>
-
-      {/* Back glass wall */}
-      <mesh position={[4, 1.5, 5.75]}>
-        <boxGeometry args={[6.5, 3, 0.06]} />
-        <meshStandardMaterial color="#88aacc" transparent opacity={0.1} roughness={0.05} metalness={0.4} />
-      </mesh>
-      {/* Back frame - top */}
-      <mesh position={[4, 3, 5.75]}><boxGeometry args={[6.5, 0.06, 0.08]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
-      {/* Back frame - verticals */}
-      <mesh position={[1.0, 1.5, 5.75]}><boxGeometry args={[0.06, 3, 0.08]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
-      <mesh position={[7.0, 1.5, 5.75]}><boxGeometry args={[0.06, 3, 0.08]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
-
-      {/* Right wall (partial, shorter) */}
-      <mesh position={[7.0, 1.5, 4.5]}>
-        <boxGeometry args={[0.06, 3, 2.5]} />
-        <meshStandardMaterial color="#3b3b5c" roughness={0.9} />
-      </mesh>
-      <mesh position={[7.0, 3, 4.5]}><boxGeometry args={[0.08, 0.06, 2.5]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
+      <mesh position={[1.0, 1.5, 3]}><boxGeometry args={[0.08, 0.04, 5.5]} /><meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} transparent opacity={0.3} /></mesh>
 
       {/* Front opening - door frame pillars */}
-      <mesh position={[1.0, 1.5, 0.25]}><boxGeometry args={[0.1, 3, 0.1]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
-      <mesh position={[7.0, 1.5, 0.25]}><boxGeometry args={[0.1, 3, 0.1]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
-      <mesh position={[4, 3, 0.25]}><boxGeometry args={[6, 0.06, 0.1]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
+      <mesh position={[1.0, 1.5, 0.25]}><boxGeometry args={[0.1, 3, 0.1]} /><meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} /></mesh>
+      <mesh position={[4, 3, 0.25]}><boxGeometry args={[6, 0.06, 0.1]} /><meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} /></mesh>
 
       {/* ─── CONFERENCE TABLE ─── */}
       {/* Tabletop */}
@@ -1256,7 +1193,7 @@ function MeetingRoom() {
       ))}
 
       {/* ─── SCREEN / MONITOR on back wall ─── */}
-      <group position={[4, 1.6, 5.55]}>
+      <group position={[4, 1.45, 0.4]} scale={0.7}>
         {/* Bezel */}
         <mesh>
           <boxGeometry args={[2.8, 1.6, 0.06]} />
@@ -1284,26 +1221,6 @@ function MeetingRoom() {
           <sphereGeometry args={[0.03, 8, 8]} />
           <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={2} />
         </mesh>
-      </group>
-
-      {/* ─── WHITEBOARD on left wall ─── */}
-      <group position={[1.15, 1.6, 4.5]} rotation={[0, Math.PI / 2, 0]}>
-        <mesh>
-          <boxGeometry args={[1.6, 1.1, 0.04]} />
-          <meshStandardMaterial color="#f5f5f0" roughness={0.3} />
-        </mesh>
-        {/* Frame */}
-        <mesh position={[0, 0, -0.01]}>
-          <boxGeometry args={[1.7, 1.2, 0.02]} />
-          <meshStandardMaterial color="#555" />
-        </mesh>
-        {/* Marker lines */}
-        {[0.25, 0.05, -0.15].map((y, i) => (
-          <mesh key={`wb-${i}`} position={[-0.3, y, 0.025]}>
-            <boxGeometry args={[0.8, 0.04, 0.001]} />
-            <meshStandardMaterial color={i === 0 ? '#e74c3c' : i === 1 ? '#3498db' : '#f39c12'} />
-          </mesh>
-        ))}
       </group>
 
       {/* ─── DECORATIONS ─── */}
@@ -1380,67 +1297,53 @@ function RestRoom() {
       {/* Rest room floor */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-5, 0.005, 3.8]} receiveShadow>
         <planeGeometry args={[6, 4.8]} />
-        <meshStandardMaterial color="#6b5444" roughness={0.8} />
+        <meshStandardMaterial color="#e4e2df" roughness={0.8} />
       </mesh>
       {/* Warmer area rug */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-5, 0.008, 3.8]}>
         <planeGeometry args={[5.5, 4.2]} />
-        <meshStandardMaterial color="#9c5b45" roughness={0.95} />
+        <meshStandardMaterial color="#cdd1d6" roughness={0.95} />
       </mesh>
 
       {/* ─── GLASS PARTITIONS ─── */}
       {/* Right partition (separates from main office) */}
       <mesh position={[-1.8, 1.5, 3.8]}>
         <boxGeometry args={[0.06, 3, 4.8]} />
-        <meshStandardMaterial color="#88aacc" transparent opacity={0.08} roughness={0.05} metalness={0.4} />
+        <meshStandardMaterial color="#cfe3ee" transparent opacity={0.14} roughness={0.05} metalness={0.4} />
       </mesh>
       <mesh position={[-1.8, 3, 3.8]}>
         <boxGeometry args={[0.08, 0.06, 4.8]} />
-        <meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} />
+        <meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} />
       </mesh>
-      <mesh position={[-1.8, 1.5, 1.4]}><boxGeometry args={[0.08, 3, 0.06]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
-      <mesh position={[-1.8, 1.5, 6.2]}><boxGeometry args={[0.08, 3, 0.06]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
+      <mesh position={[-1.8, 1.5, 1.4]}><boxGeometry args={[0.08, 3, 0.06]} /><meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} /></mesh>
+      <mesh position={[-1.8, 1.5, 6.2]}><boxGeometry args={[0.08, 3, 0.06]} /><meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} /></mesh>
       {/* Mid horizontal bar */}
-      <mesh position={[-1.8, 1.5, 3.8]}><boxGeometry args={[0.08, 0.04, 4.8]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} transparent opacity={0.3} /></mesh>
+      <mesh position={[-1.8, 1.5, 3.8]}><boxGeometry args={[0.08, 0.04, 4.8]} /><meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} transparent opacity={0.3} /></mesh>
 
       {/* Front partition (partial, with opening for entry) */}
       <mesh position={[-5.8, 1.5, 1.4]}>
         <boxGeometry args={[2.4, 3, 0.06]} />
-        <meshStandardMaterial color="#88aacc" transparent opacity={0.08} roughness={0.05} metalness={0.4} />
+        <meshStandardMaterial color="#cfe3ee" transparent opacity={0.14} roughness={0.05} metalness={0.4} />
       </mesh>
       <mesh position={[-5.8, 3, 1.4]}>
         <boxGeometry args={[2.4, 0.06, 0.08]} />
-        <meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} />
+        <meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} />
       </mesh>
-      <mesh position={[-4.6, 1.5, 1.4]}><boxGeometry args={[0.06, 3, 0.08]} /><meshStandardMaterial color="#445566" metalness={0.7} roughness={0.3} /></mesh>
+      <mesh position={[-4.6, 1.5, 1.4]}><boxGeometry args={[0.06, 3, 0.08]} /><meshStandardMaterial color="#2f343b" metalness={0.5} roughness={0.4} /></mesh>
 
       {/* ─── TV AREA ─── */}
       {/* TV stand / console */}
       <RoundedBox args={[2.2, 0.5, 0.4]} radius={0.03} position={[-5, 0.25, 5.6]} castShadow>
-        <meshStandardMaterial color="#1a1a2e" roughness={0.6} metalness={0.2} />
+        <meshStandardMaterial color="#c49a6c" roughness={0.6} />
       </RoundedBox>
-      {/* TV Screen bezel */}
-      <mesh position={[-5, 1.5, 5.7]} castShadow>
-        <boxGeometry args={[2.6, 1.45, 0.07]} />
-        <meshStandardMaterial color="#0a0a0a" roughness={0.5} metalness={0.3} />
+      {/* TV (pequeña y sobre el mueble: desde la cámara se ve su parte trasera) */}
+      <mesh position={[-5, 1.0, 5.68]} castShadow>
+        <boxGeometry args={[1.6, 0.92, 0.06]} />
+        <meshStandardMaterial color="#3a3a3a" roughness={0.5} />
       </mesh>
-      {/* TV display */}
-      <mesh position={[-5, 1.5, 5.655]} ref={tvRef}>
-        <planeGeometry args={[2.4, 1.28]} />
-        <meshStandardMaterial color="#0a1628" emissive="#1a3050" emissiveIntensity={0.6} />
-      </mesh>
-      {/* TV content - landscape scene (colorful rectangles) */}
-      <mesh position={[-5.3, 1.65, 5.66]}>
-        <boxGeometry args={[1.2, 0.7, 0.001]} />
-        <meshStandardMaterial color="#2563eb" emissive="#2563eb" emissiveIntensity={0.6} transparent opacity={0.25} />
-      </mesh>
-      <mesh position={[-4.6, 1.35, 5.66]}>
-        <circleGeometry args={[0.35, 16]} />
-        <meshStandardMaterial color="#ef4444" emissive="#ef4444" emissiveIntensity={0.4} transparent opacity={0.2} />
-      </mesh>
-      <mesh position={[-5, 1.2, 5.66]}>
-        <boxGeometry args={[2.0, 0.15, 0.001]} />
-        <meshStandardMaterial color="#22c55e" emissive="#22c55e" emissiveIntensity={0.3} transparent opacity={0.15} />
+      <mesh position={[-5, 1.0, 5.645]} ref={tvRef}>
+        <planeGeometry args={[1.48, 0.8]} />
+        <meshStandardMaterial color="#1b2a3a" emissive="#5d8fb8" emissiveIntensity={0.6} side={THREE.DoubleSide} />
       </mesh>
       {/* TV glow */}
       <pointLight position={[-5, 1.5, 4.8]} intensity={0.6} color="#4488cc" distance={4} decay={2} />
@@ -1449,28 +1352,28 @@ function RestRoom() {
       <group position={[-5, 0, 3.2]}>
         {/* Sofa base */}
         <RoundedBox args={[2.4, 0.32, 0.75]} radius={0.06} position={[0, 0.22, 0]} castShadow>
-          <meshStandardMaterial color="#2d1b4e" roughness={0.9} />
+          <meshStandardMaterial color="#6b7280" roughness={0.9} />
         </RoundedBox>
         {/* Sofa back */}
         <RoundedBox args={[2.4, 0.5, 0.15]} radius={0.04} position={[0, 0.5, -0.3]} castShadow>
-          <meshStandardMaterial color="#2d1b4e" roughness={0.9} />
+          <meshStandardMaterial color="#6b7280" roughness={0.9} />
         </RoundedBox>
         {/* Left armrest */}
         <RoundedBox args={[0.15, 0.25, 0.75]} radius={0.04} position={[-1.15, 0.38, 0]} castShadow>
-          <meshStandardMaterial color="#2d1b4e" roughness={0.9} />
+          <meshStandardMaterial color="#6b7280" roughness={0.9} />
         </RoundedBox>
         {/* Right armrest */}
         <RoundedBox args={[0.15, 0.25, 0.75]} radius={0.04} position={[1.15, 0.38, 0]} castShadow>
-          <meshStandardMaterial color="#2d1b4e" roughness={0.9} />
+          <meshStandardMaterial color="#6b7280" roughness={0.9} />
         </RoundedBox>
         {/* Seat cushions */}
         <mesh position={[-0.45, 0.42, 0.03]} castShadow>
           <boxGeometry args={[0.6, 0.1, 0.5]} />
-          <meshStandardMaterial color="#3a2560" roughness={0.95} />
+          <meshStandardMaterial color="#9ca3af" roughness={0.95} />
         </mesh>
         <mesh position={[0.45, 0.42, 0.03]} castShadow>
           <boxGeometry args={[0.6, 0.1, 0.5]} />
-          <meshStandardMaterial color="#3a2560" roughness={0.95} />
+          <meshStandardMaterial color="#9ca3af" roughness={0.95} />
         </mesh>
         {/* Throw pillows */}
         <mesh position={[-0.85, 0.52, -0.1]} rotation={[0.1, 0.3, 0.2]}>
@@ -1655,7 +1558,7 @@ function RestRoom() {
       <group position={[-5.8, 0, 4.0]}>
         <mesh position={[0, 0.08, 0]} castShadow>
           <cylinderGeometry args={[0.28, 0.3, 0.14, 16]} />
-          <meshStandardMaterial color="#7c2d92" roughness={0.9} />
+          <meshStandardMaterial color="#4b5563" roughness={0.9} />
         </mesh>
       </group>
       {/* Second gaming bean bag */}
@@ -1682,7 +1585,7 @@ function RestRoom() {
       {/* Cozy carpet under TV area */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-5, 0.01, 4.5]}>
         <planeGeometry args={[3.2, 2.2]} />
-        <meshStandardMaterial color="#1a1a35" roughness={0.95} />
+        <meshStandardMaterial color="#d6dadf" roughness={0.95} />
       </mesh>
       {/* Poster on right partition */}
       <mesh position={[-1.75, 1.8, 3.8]} rotation={[0, Math.PI/2, 0]}>
@@ -1691,7 +1594,7 @@ function RestRoom() {
       </mesh>
       <mesh position={[-1.73, 1.85, 3.8]} rotation={[0, Math.PI/2, 0]}>
         <planeGeometry args={[0.4, 0.55]} />
-        <meshStandardMaterial color="#7c3aed" emissive="#7c3aed" emissiveIntensity={0.3} transparent opacity={0.4} />
+        <meshStandardMaterial color="#6b7280" emissive="#7c3aed" emissiveIntensity={0.3} transparent opacity={0.4} />
       </mesh>
 
       {/* ─── FLOOR LABEL ─── */}
@@ -1776,7 +1679,7 @@ function MeetingAgent({ agent, deskPos, meetingChair, phase, isSpokesperson, rep
         position={[0, 0, 0]}
         deskRotation={groupRef.current?.rotation.y || 0}
         onClick={onClick}
-        scale={1.1}
+        scale={1.3}
       />
       {/* Speech bubble for spokesperson during reporting */}
       {isSpokesperson && phase === 'reporting' && reportLines && reportLines.length > 0 && (
@@ -1898,7 +1801,7 @@ function RestAgent({ agent, deskPos, restSpot, onClick }: {
         position={[0, 0, 0]}
         deskRotation={groupRef.current?.rotation.y || restSpot.rot}
         onClick={onClick}
-        scale={1.1}
+        scale={1.3}
       />
 
       {/* Activity-specific props */}
@@ -1996,45 +1899,42 @@ export default function OfficeScene({
   return (
     <Canvas
       shadows
-      camera={{ position: [0.5, 20, 0.5], fov: 38, near: 0.1, far: 100 }}
-      gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.6 }}
-      style={{ background: '#0d1117' }}
+      orthographic
+      // Isométrica: cámara en la diagonal (x, y, z iguales) mirando al centro.
+      camera={{ position: [20, 20, 20], zoom: 52, near: -100, far: 200 }}
+      gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
+      style={{ background: 'linear-gradient(160deg, #f4f5f7 0%, #e6e9ed 55%, #d5dae0 100%)' }}
     >
-      {/* Lighting - warm daylight from above */}
-      <ambientLight intensity={0.65} color="#fff3e2" />
+      {/* Lighting - soft warm daylight */}
+      <ambientLight intensity={0.95} color="#ffffff" />
       <directionalLight
-        position={[0, 20, 3]}
-        intensity={2}
-        color="#fff5e6"
+        position={[10, 18, 8]}
+        intensity={1.6}
+        color="#ffffff"
         castShadow
         shadow-mapSize-width={2048}
         shadow-mapSize-height={2048}
         shadow-camera-left={-14}
         shadow-camera-right={14}
         shadow-camera-top={12}
-        shadow-camera-bottom={-8}
+        shadow-camera-bottom={-12}
         shadow-camera-near={0.1}
-        shadow-camera-far={40}
-        shadow-bias={-0.002}
+        shadow-camera-far={50}
+        shadow-bias={-0.0015}
+        shadow-radius={4}
       />
-      <directionalLight position={[8, 12, -5]} intensity={0.5} color="#8899cc" />
-      <directionalLight position={[-8, 12, 5]} intensity={0.4} color="#cc9988" />
-      <hemisphereLight args={['#fff4e0', '#3a2f28', 0.35]} />
+      <hemisphereLight args={['#ffffff', '#d9dde2', 0.5]} />
 
-      {/* Controls - top-down overhead view */}
+      {/* Controls - isometric: only horizontal rotation, pan and zoom */}
       <OrbitControls
         enablePan={true}
         enableZoom={true}
         enableRotate={true}
-        minPolarAngle={0.1}
-        maxPolarAngle={Math.PI / 4}
-        minAzimuthAngle={-Infinity}
-        maxAzimuthAngle={Infinity}
-        minDistance={8}
-        maxDistance={35}
-        target={[1, 0, -0.5]}
-        autoRotate
-        autoRotateSpeed={0.2}
+        minPolarAngle={0.955}
+        maxPolarAngle={0.955}
+        minZoom={28}
+        maxZoom={140}
+        target={[0, 0, 0.3]}
       />
 
       {/* Office environment */}
@@ -2056,8 +1956,7 @@ export default function OfficeScene({
       <Bookshelf position={[-3, 0.8, -5.25]} />
       <Bookshelf position={[3, 0.8, -5.25]} />
       <WaterCooler position={[7, 0, -2]} />
-      <pointLight position={[0, 3.5, -3.2]} intensity={1.2} color="#ffe2b0" distance={9} decay={1.5} />
-      <pointLight position={[-3, 3.5, 0.2]} intensity={1.0} color="#ffe2b0" distance={8} decay={1.5} />
+
 
       {/* ═══ MEETING MODE ═══ */}
       {meetingPhase !== 'idle' ? (
@@ -2069,8 +1968,8 @@ export default function OfficeScene({
               <Chair position={layout.chair} rotation={layout.rot} />
             </group>
           ))}
-          <ExecutiveDesk position={EXEC_DESK} rotation={Math.PI} />
-          <ExecutiveChair position={EXEC_CHAIR} rotation={Math.PI} />
+          <ExecutiveDesk position={EXEC_DESK} rotation={0} />
+          <ExecutiveChair position={EXEC_CHAIR} rotation={0} />
           {/* Agents walking / sitting / talking (lead takes the head of the table) */}
           {[...staff, ...(lead ? [lead] : [])].map((agent, i) => {
             const isLead = agent.id === leadId
@@ -2096,8 +1995,8 @@ export default function OfficeScene({
           {lead && <ExecutiveWorkstation agent={lead} onClick={() => onAgentClick?.(lead)} />}
           {!lead && (
             <>
-              <ExecutiveDesk position={EXEC_DESK} rotation={Math.PI} />
-              <ExecutiveChair position={EXEC_CHAIR} rotation={Math.PI} />
+              <ExecutiveDesk position={EXEC_DESK} rotation={0} />
+              <ExecutiveChair position={EXEC_CHAIR} rotation={0} />
             </>
           )}
           {staff.map((agent, i) => {

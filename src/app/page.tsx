@@ -429,7 +429,7 @@ export default function VirtualOffice() {
                   }}
                   className={`pointer-events-auto flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all duration-200 border ${
                     currentProject?.id === p.id
-                      ? 'bg-white/15 border-white/20 text-white shadow-lg'
+                      ? 'bg-black/70 border-white/20 text-white shadow-lg'
                       : 'bg-black/40 border-white/[0.06] text-white/50 hover:bg-black/60 hover:text-white/70'
                   } backdrop-blur-xl`}
                 >
