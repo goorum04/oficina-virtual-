@@ -24,7 +24,7 @@ const TOOLS: Array<Anthropic.Tool & { readOnly?: boolean }> = [
   {
     name: 'correo_listar',
     readOnly: true,
-    description: 'Lista los correos de la bandeja de entrada de Outlook (los más recientes primero): id, remitente, asunto, fecha, si está leído, categorías y un extracto.',
+    description: 'Lista los correos de las bandejas de entrada de todas las cuentas de Outlook (los más recientes primero): id, cuenta, remitente, asunto, fecha, si está leído, categorías y un extracto.',
     input_schema: {
       type: 'object',
       properties: {
@@ -33,6 +33,12 @@ const TOOLS: Array<Anthropic.Tool & { readOnly?: boolean }> = [
         soloNoLeidos: { type: 'boolean' },
       },
     },
+  },
+  {
+    name: 'correo_cuentas',
+    readOnly: true,
+    description: 'Cuentas de correo configuradas en el Outlook del PC: nombre, nº de correos en la bandeja de entrada y fecha del último recibido.',
+    input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'correo_leer',
@@ -76,6 +82,7 @@ export function isMailWriteTool(name: string): boolean {
 export async function runMailTool(name: string, input: Record<string, unknown>, agentId: string): Promise<string> {
   const kind = {
     correo_listar: 'mail_list',
+    correo_cuentas: 'mail_accounts',
     correo_leer: 'mail_read',
     correo_clasificar: 'mail_categorize',
     correo_mover: 'mail_move',

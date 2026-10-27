@@ -236,13 +236,22 @@ catch {
 }
 $ns = $ol.GetNamespace('MAPI')
 $inbox = $ns.GetDefaultFolder(6)
+# Bandejas de entrada de todas las cuentas configuradas en Outlook.
+function AllInboxes {
+  $list = @()
+  foreach ($st in $ns.Stores) {
+    try { $list += [pscustomobject]@{ cuenta = $st.DisplayName; folder = $st.GetDefaultFolder(6) } } catch {}
+  }
+  if (-not $list.Count) { $list += [pscustomobject]@{ cuenta = $inbox.Store.DisplayName; folder = $inbox } }
+  return $list
+}
 function SenderSmtp($m) {
   try { if ($m.SenderEmailType -eq 'EX') { $u = $m.Sender.GetExchangeUser(); if ($u) { return $u.PrimarySmtpAddress } } } catch {}
   return $m.SenderEmailAddress
 }
 function Clip($s, $n) {
   if ($null -eq $s) { return '' }
-  $t = ($s -replace '\\s+', ' ').Trim()
+  $t = (($s -replace '<?https?://[^\\s>]+>?', '') -replace '\\s+', ' ').Trim()
   if ($t.Length -gt $n) { return $t.Substring(0, $n) + '...' } else { return $t }
 }
 `
@@ -252,24 +261,39 @@ const OUTLOOK_SCRIPTS = {
 $since = if ($env:BR_SINCE) { [datetime]::Parse($env:BR_SINCE) } else { (Get-Date).AddDays(-2) }
 $max = [int]$env:BR_MAX
 $unreadOnly = $env:BR_UNREAD -eq '1'
-$items = $inbox.Items
-$items.Sort('[ReceivedTime]', $true)
 $out = New-Object System.Collections.ArrayList
-$m = $items.GetFirst()
-while ($m -ne $null -and $out.Count -lt $max) {
-  if ($m.Class -eq 43) {
-    if ($m.ReceivedTime -lt $since) { break }
-    if (-not $unreadOnly -or $m.UnRead) {
-      [void]$out.Add([ordered]@{
-        id = $m.EntryID; de = $m.SenderName; email = (SenderSmtp $m); asunto = $m.Subject
-        recibido = $m.ReceivedTime.ToString('yyyy-MM-ddTHH:mm'); leido = (-not $m.UnRead)
-        categorias = $m.Categories; adjuntos = $m.Attachments.Count; extracto = (Clip $m.Body 400)
-      })
+foreach ($ib in (AllInboxes)) {
+  $items = $ib.folder.Items
+  $items.Sort('[ReceivedTime]', $true)
+  $n = 0
+  $m = $items.GetFirst()
+  while ($m -ne $null -and $n -lt $max) {
+    if ($m.Class -eq 43) {
+      if ($m.ReceivedTime -lt $since) { break }
+      if (-not $unreadOnly -or $m.UnRead) {
+        [void]$out.Add([ordered]@{
+          id = $m.EntryID; cuenta = $ib.cuenta; de = $m.SenderName; email = (SenderSmtp $m); asunto = $m.Subject
+          recibido = $m.ReceivedTime.ToString('yyyy-MM-ddTHH:mm'); leido = (-not $m.UnRead)
+          categorias = $m.Categories; adjuntos = $m.Attachments.Count; extracto = (Clip $m.Body 400)
+        })
+        $n++
+      }
     }
+    $m = $items.GetNext()
   }
-  $m = $items.GetNext()
 }
-ConvertTo-Json -InputObject @($out) -Depth 3 -Compress
+$sorted = @($out | Sort-Object { $_.recibido } -Descending | Select-Object -First $max)
+ConvertTo-Json -InputObject $sorted -Depth 3 -Compress
+`,
+  mail_accounts: `
+$res = @()
+foreach ($ib in (AllInboxes)) {
+  $items = $ib.folder.Items
+  $items.Sort('[ReceivedTime]', $true)
+  $first = $items.GetFirst()
+  $res += [ordered]@{ cuenta = $ib.cuenta; correos = $items.Count; ultimo = $(if ($first) { $first.ReceivedTime.ToString('yyyy-MM-ddTHH:mm') } else { $null }) }
+}
+ConvertTo-Json -InputObject @($res) -Depth 3 -Compress
 `,
   mail_read: `
 $m = $ns.GetItemFromID($env:BR_ID)
@@ -298,6 +322,7 @@ ConvertTo-Json -Compress -InputObject ('Clasificado como ' + $cat + ': ' + $m.Su
   mail_move: `
 $m = $ns.GetItemFromID($env:BR_ID)
 $f = $inbox
+try { $f = $m.Parent.Store.GetDefaultFolder(6) } catch {}
 foreach ($part in ($env:BR_FOLDER -split '[\\\\/]')) {
   $name = $part.Trim()
   if (-not $name) { continue }
@@ -337,6 +362,9 @@ Object.assign(handlers, {
       BR_UNREAD: soloNoLeidos ? '1' : '0',
     })
   },
+  mail_accounts() {
+    return runOutlook('mail_accounts', {})
+  },
   mail_read({ id }) {
     return runOutlook('mail_read', { BR_ID: String(id || '') })
   },
@@ -362,6 +390,7 @@ function describe(cmd) {
     case 'info': return 'INFO del equipo'
     case 'mail_list': return `CORREO: listar${p.desde ? ` desde ${p.desde}` : ''}`
     case 'mail_read': return 'CORREO: leer un mensaje'
+    case 'mail_accounts': return 'CORREO: ver cuentas de Outlook'
     case 'mail_categorize': return `CORREO: clasificar como ${p.categoria}`
     case 'mail_move': return `CORREO: mover a ${p.carpeta}`
     default: return `${cmd.kind.toUpperCase()}: ${p.path}`
