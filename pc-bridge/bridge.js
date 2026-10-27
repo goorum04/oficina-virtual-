@@ -259,11 +259,13 @@ function SenderSmtp($m) {
   try { if ($m.SenderEmailType -eq 'EX') { $u = $m.Sender.GetExchangeUser(); if ($u) { return $u.PrimarySmtpAddress } } } catch {}
   return $m.SenderEmailAddress
 }
-# Los ids que se dan a la oficina son "<buzón>|<correo>": fuera del buzón por
-# defecto, Outlook necesita los dos para encontrar el mensaje.
+# Fuera del buzón por defecto, Outlook necesita también el id del buzón para
+# encontrar un mensaje. Con BR_ACCOUNT el buzón se deduce de la cuenta y los
+# ids que se dan a la oficina son cortos; sin ella van como "<buzón>|<correo>".
 function GetMail($id) {
   $parts = ([string]$id) -split '\\|', 2
   if ($parts.Count -eq 2) { return $ns.GetItemFromID($parts[1], $parts[0]) }
+  if ($env:BR_ACCOUNT) { return $ns.GetItemFromID($parts[0], (AllInboxes)[0].folder.StoreID) }
   return $ns.GetItemFromID($parts[0])
 }
 function Clip($s, $n) {
@@ -289,7 +291,7 @@ foreach ($ib in (AllInboxes)) {
       if ($m.ReceivedTime -lt $since) { break }
       if (-not $unreadOnly -or $m.UnRead) {
         [void]$out.Add([ordered]@{
-          id = ($ib.folder.StoreID + '|' + $m.EntryID); cuenta = $ib.cuenta; de = $m.SenderName; email = (SenderSmtp $m); asunto = $m.Subject
+          id = $(if ($env:BR_ACCOUNT) { $m.EntryID } else { $ib.folder.StoreID + '|' + $m.EntryID }); cuenta = $ib.cuenta; de = $m.SenderName; email = (SenderSmtp $m); asunto = $m.Subject
           recibido = $m.ReceivedTime.ToString('yyyy-MM-ddTHH:mm'); leido = (-not $m.UnRead)
           categorias = $m.Categories; adjuntos = $m.Attachments.Count; extracto = (Clip $m.Body 400)
         })
@@ -383,19 +385,19 @@ Object.assign(handlers, {
   mail_accounts() {
     return runOutlook('mail_accounts', {})
   },
-  mail_read({ id }) {
-    return runOutlook('mail_read', { BR_ID: String(id || '') })
+  mail_read({ id, cuenta }) {
+    return runOutlook('mail_read', { BR_ID: String(id || ''), BR_ACCOUNT: cuenta ? String(cuenta) : '' })
   },
-  mail_categorize({ id, categoria, categoryPrefix }) {
+  mail_categorize({ id, categoria, categoryPrefix, cuenta }) {
     const short = String(categoria || '').replace(String(categoryPrefix || ''), '')
     return runOutlook('mail_categorize', {
-      BR_ID: String(id || ''), BR_CAT: String(categoria || ''),
+      BR_ID: String(id || ''), BR_CAT: String(categoria || ''), BR_ACCOUNT: cuenta ? String(cuenta) : '',
       BR_PREFIX: String(categoryPrefix || 'Gestoría: '), BR_COLOR: String(CATEGORY_COLORS[short] || 0),
     })
   },
-  mail_move({ id, carpeta }) {
+  mail_move({ id, carpeta, cuenta }) {
     if (!String(carpeta || '').trim()) throw new Error('Falta la carpeta')
-    return runOutlook('mail_move', { BR_ID: String(id || ''), BR_FOLDER: String(carpeta) })
+    return runOutlook('mail_move', { BR_ID: String(id || ''), BR_FOLDER: String(carpeta), BR_ACCOUNT: cuenta ? String(cuenta) : '' })
   },
 })
 
