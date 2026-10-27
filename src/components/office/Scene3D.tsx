@@ -1884,13 +1884,14 @@ export default function OfficeScene({
   return (
     <Canvas
       shadows
-      orthographic
       // Rendimiento: sin luces puntuales (solo ambiente + sol + cielo), sombras
       // a 1024 y nitidez limitada en pantallas de alta densidad.
       dpr={[1, 1.5]}
       performance={{ min: 0.5 }}
-      // Isométrica: cámara en la diagonal (x, y, z iguales) mirando al centro.
-      camera={{ position: [20, 20, 20], zoom: 52, near: -100, far: 200 }}
+      // Casi isométrica: cámara en perspectiva normal, lejos y con un ángulo
+      // muy cerrado, en la diagonal (x = y = z). Con cámara ortográfica y
+      // near negativo, algunas tarjetas gráficas dibujaban la escena en negro.
+      camera={{ position: [34, 34, 34], fov: 20, near: 1, far: 300 }}
       gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
       style={{ background: 'linear-gradient(160deg, #f4f5f7 0%, #e6e9ed 55%, #d5dae0 100%)' }}
     >
@@ -1921,8 +1922,8 @@ export default function OfficeScene({
         enableRotate={true}
         minPolarAngle={0.955}
         maxPolarAngle={0.955}
-        minZoom={28}
-        maxZoom={140}
+        minDistance={25}
+        maxDistance={110}
         target={[0, 0, 0.3]}
       />
 
