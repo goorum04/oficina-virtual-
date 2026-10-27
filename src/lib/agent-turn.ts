@@ -128,7 +128,7 @@ export async function runAgentTurn(opts: {
       max_tokens: opts.maxTokens ?? 2048,
       system,
       tools,
-      messages,
+      messages: withCachedTail(messages),
     })
     inputTokens += response.usage.input_tokens
     outputTokens += response.usage.output_tokens
@@ -191,6 +191,21 @@ export async function runAgentTurn(opts: {
   }
 
   return { text: '(demasiados pasos de herramientas en esta petición, intenta algo más simple)', messages, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens }
+}
+
+// Marca el final de la conversación para la caché: en cada paso lo ya leído
+// (correos, PDFs, resultados de herramientas) se cobra al 10 % en vez de
+// entero. Solo en la copia que se envía, para no acumular marcas (máx. 4).
+function withCachedTail(messages: Anthropic.MessageParam[]): Anthropic.MessageParam[] {
+  const last = messages[messages.length - 1]
+  if (!last) return messages
+  const content: Anthropic.ContentBlockParam[] = typeof last.content === 'string'
+    ? [{ type: 'text', text: last.content }]
+    : [...last.content]
+  const end = content.length - 1
+  if (end < 0) return messages
+  content[end] = { ...content[end], cache_control: { type: 'ephemeral' } } as Anthropic.ContentBlockParam
+  return [...messages.slice(0, -1), { ...last, content }]
 }
 
 // Añade una nota del sistema como turno del usuario sin romper la
