@@ -166,7 +166,7 @@ export async function POST(
     take: 15,
   })
   const tasksNote = openTasks.length
-    ? `\nTus tareas abiertas ahora mismo en la oficina:\n${openTasks.map(t => `- ${t.title}${t.description ? ` (${t.description.replace(/\n/g, '; ').slice(0, 160)})` : ''}`).join('\n')}`
+    ? `\nTRABAJO EN CURSO: estas son tus tareas abiertas ahora mismo (asignadas en el repaso de clientes prioritarios). Si te preguntan qué haces o en qué trabajas, explícalas; aunque antes en la conversación dijeras otra cosa, esto es lo actual:\n${openTasks.map(t => `- ${t.title}${t.description ? ` (${t.description.replace(/\n/g, '; ').slice(0, 160)})` : ''}`).join('\n')}`
     : ''
   // El agente de llamadas no usa el PC: cada herramienta de más hace la
   // respuesta más lenta.
