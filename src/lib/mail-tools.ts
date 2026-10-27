@@ -4,6 +4,7 @@ import { officeProtected } from '@/lib/access'
 import { pcConfigured, runPcCommand } from '@/lib/pc'
 import { MAIL_AGENT_ID } from '@/lib/gestoria-tools'
 import type { ToolOutput } from '@/lib/pc-tools'
+import { OFFICE_EXTS, officeText } from '@/lib/office-text'
 
 // Correo de Outlook leído en el propio PC a través del puente (órdenes
 // mail_* de pc-bridge, que usan el Outlook de escritorio). Son órdenes fijas
@@ -85,7 +86,7 @@ const TOOLS: Array<Anthropic.Tool & { readOnly?: boolean }> = [
   {
     name: 'correo_adjunto',
     readOnly: true,
-    description: 'Abre un adjunto de un correo (PDF o imagen se ven directamente; máx. 3 MB). indice empieza en 1, en el orden de la lista "adjuntos".',
+    description: 'Abre un adjunto de un correo (PDF e imágenes se ven directamente; de Excel y Word se lee el texto; máx. 3 MB). indice empieza en 1, en el orden de la lista "adjuntos".',
     input_schema: {
       type: 'object',
       properties: { id: { type: 'string' }, indice: { type: 'number' } },
@@ -132,6 +133,7 @@ export async function runMailTool(name: string, input: Record<string, unknown>, 
     if (ext === '.pdf') return [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: file.base64 } }]
     if (IMAGE_TYPES[ext]) return [{ type: 'image', source: { type: 'base64', media_type: IMAGE_TYPES[ext] as 'image/png', data: file.base64 } }]
     if (['.txt', '.csv', '.md'].includes(ext)) return Buffer.from(file.base64, 'base64').toString('utf8').slice(0, 30_000)
+    if (OFFICE_EXTS.includes(ext)) return `Contenido de "${file.name}":\n${officeText(file.name, file.base64)}`
     return `Adjunto "${file.name}" (${file.size} bytes): formato que no se puede leer directamente (pídelo en PDF si hace falta).`
   }
   const kind = {

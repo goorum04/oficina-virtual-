@@ -2,6 +2,7 @@ import type Anthropic from '@anthropic-ai/sdk'
 import { gestoriaConfigured, gestoriaUpload, toToolText } from '@/lib/gestoria'
 import { bridgeStatus, pcConfigured, runPcCommand } from '@/lib/pc'
 import { officeProtected } from '@/lib/access'
+import { OFFICE_EXTS, officeText } from '@/lib/office-text'
 
 // Herramientas para controlar el PC de la gestoría a través del puente
 // (pc-bridge/). Las tienen todos los agentes en cuanto PC_BRIDGE_TOKEN está
@@ -37,7 +38,7 @@ const TOOLS: PcTool[] = [
   },
   {
     name: 'pc_leer', readOnly: true,
-    description: 'Lee un archivo del PC: texto tal cual; PDF e imágenes los ves directamente (máx. 3 MB).',
+    description: 'Lee un archivo del PC: texto tal cual; PDF e imágenes los ves directamente; de Excel (.xlsx) y Word (.docx) recibes el texto (máx. 3 MB).',
     properties: { path }, required: ['path'],
   },
   {
@@ -154,6 +155,8 @@ export async function runPcTool(toolName: string, input: Record<string, unknown>
         if (file.mimeType === 'application/pdf') {
           return [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: file.base64 } }]
         }
+        const ext = (file.name.match(/\.[^.]+$/)?.[0] || '').toLowerCase()
+        if (OFFICE_EXTS.includes(ext)) return `Contenido de "${file.name}":\n${officeText(file.name, file.base64)}`
         return `Archivo binario (${file.mimeType}, ${file.size} bytes): no se puede mostrar su contenido.`
       }
       case 'pc_subir_a_gestoria': {

@@ -89,6 +89,8 @@ Tienes acceso al repositorio de GitHub "${agent.githubRepo}" mediante herramient
   return base
 }
 
+export type TurnUsage = { inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number }
+
 export async function runAgentTurn(opts: {
   model: string
   system: string
@@ -101,7 +103,12 @@ export async function runAgentTurn(opts: {
   agentId: string
   maxTokens?: number
   maxSteps?: number
-}): Promise<{ text: string; inputTokens: number; outputTokens: number; cacheWriteTokens: number; cacheReadTokens: number }> {
+  // Trabajos largos (gestor de caso): pasada esta hora se para antes de la
+  // siguiente consulta al modelo y devuelve paused + los mensajes para
+  // seguir en otra petición. onStep guarda el progreso tras cada tanda.
+  deadline?: number
+  onStep?: (messages: Anthropic.MessageParam[], usage: TurnUsage) => Promise<void>
+}): Promise<TurnUsage & { text: string; paused?: boolean; messages: Anthropic.MessageParam[] }> {
   const messages: Anthropic.MessageParam[] = [...opts.history]
   let inputTokens = 0
   let outputTokens = 0
@@ -113,6 +120,9 @@ export async function runAgentTurn(opts: {
   const tools = opts.tools?.map((t, i, all) => (i === all.length - 1 ? { ...t, cache_control: { type: 'ephemeral' as const } } : t))
 
   for (let i = 0; i < (opts.maxSteps ?? 10); i++) {
+    if (i > 0 && opts.deadline && Date.now() > opts.deadline) {
+      return { text: '', paused: true, messages, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens }
+    }
     const response = await anthropic.messages.create({
       model: opts.model,
       max_tokens: opts.maxTokens ?? 2048,
@@ -140,7 +150,7 @@ export async function runAgentTurn(opts: {
         .filter((b): b is Anthropic.TextBlock => b.type === 'text')
         .map(b => b.text)
         .join('\n') || '(sin respuesta)'
-      return { text, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens }
+      return { text, messages, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens }
     }
 
     messages.push({ role: 'assistant', content: response.content })
@@ -177,9 +187,10 @@ export async function runAgentTurn(opts: {
       }
     }
     messages.push({ role: 'user', content: toolResults })
+    await opts.onStep?.(messages, { inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens })
   }
 
-  return { text: '(demasiados pasos de herramientas en esta petición, intenta algo más simple)', inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens }
+  return { text: '(demasiados pasos de herramientas en esta petición, intenta algo más simple)', messages, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens }
 }
 
 // Añade una nota del sistema como turno del usuario sin romper la
