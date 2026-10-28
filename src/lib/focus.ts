@@ -1,3 +1,4 @@
+import { createHash } from 'crypto'
 import { db } from '@/lib/db'
 import { anthropic } from '@/lib/anthropic'
 import { officeProtected } from '@/lib/access'
@@ -26,7 +27,8 @@ export const FOCUS_CLIENTS: Array<{ name: string; clientId: string | null }> = [
   { name: 'Johanna Douar', clientId: 'cmvqrnpee0001jm07pbyzcufl' },
 ]
 
-const FOCUS_EVERY_MS = 4 * 3600_000
+// Dos repasos al día en horario de oficina (≈8:00 y ≈14:00).
+const FOCUS_EVERY_MS = 6 * 3600_000
 // Las tareas de foco llevan este prefijo: se sustituyen en cada ronda.
 const TASK_PREFIX = '★ '
 const CLOSED = ['completado', 'cancelado', 'rechazado']
@@ -156,7 +158,8 @@ export async function runFocusReview(): Promise<{ ok: boolean; message: string }
       data: tasks.map((t) => ({ ...t, status: t.progress >= 100 ? 'completed' : 'in_progress', projectId })),
     })
 
-    // Nova: un solo informe con el plan de cada cliente.
+    // Nova: un solo informe con el plan de cada cliente. Si los datos son
+    // los mismos que en el último informe, no se paga otro igual.
     const compact = briefings.map(({ name, briefing }) => briefing
       ? {
           cliente: name,
@@ -165,23 +168,10 @@ export async function runFocusReview(): Promise<{ ok: boolean; message: string }
           ultimoCorreo: briefing.ultimosCorreos[0] ?? null,
         }
       : { cliente: name, nota: 'Sin ficha en GestoriaAD' })
-    const response = await anthropic.messages.create({
-      model: MODELS.haiku,
-      max_tokens: 2500,
-      messages: [{
-        role: 'user',
-        content: `Eres Nova, coordinadora de una gestoría en Andorra. Hoy es ${new Date().toISOString().slice(0, 10)}. Estos son los clientes prioritarios con sus datos de GestoriaAD:
-${JSON.stringify(compact)}
-Escribe para el humano un plan breve: por cada cliente, 2-3 líneas (estado, lo más urgente y el siguiente paso concreto, y qué compañero lo lleva: Pau procesos, Vera alertas, Dora documentación, Olga correo, Clara KYC). Empieza por el cliente más urgente. Si un cliente no tiene ficha, dilo y sugiere darlo de alta. Sin introducciones.`,
-      }],
-    })
-    const text = response.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('\n')
-    const { input_tokens: inputTokens, output_tokens: outputTokens } = response.usage
-    await db.message.create({ data: { role: 'user', content: '★ Repaso de clientes prioritarios', agentId: lead.id } })
-    await db.message.create({
-      data: { role: 'agent', content: text, model: 'haiku', inputTokens, outputTokens, costUsd: calcCostUsd('haiku', inputTokens, outputTokens), agentId: lead.id },
-    })
-
+    const fingerprint = createHash('sha1').update(JSON.stringify(compact)).digest('hex')
+    const lastPlan = await db.activityLog.findFirst({ where: { type: 'focus_review', id: { not: log.id }, metadata: { contains: fingerprint } } })
+    if (!lastPlan) await writePlan(lead.id, compact)
+    await db.activityLog.update({ where: { id: log.id }, data: { metadata: JSON.stringify({ fingerprint }) } })
     // Expedientes con correos nuevos desde su último trabajo (o de los
     // últimos 3 días si nunca se trabajó) → cola del gestor de caso.
     const queued: string[] = []
@@ -191,11 +181,15 @@ Escribe para el humano un plan breve: por cada cliente, 2-3 líneas (estado, lo 
         where: { type: 'case_run', metadata: { contains: c.clientId } },
         orderBy: { createdAt: 'desc' },
       })
+      // Como mucho un expediente automático por cliente y día.
+      if (lastCase && Date.now() - lastCase.createdAt.getTime() < 86_400_000) continue
       const since = lastCase?.createdAt ?? new Date(Date.now() - 3 * 86_400_000)
       const surnameTerm = c.name.split(' ').slice(-1)[0].toLowerCase()
       const found = await runPcCommand('mail_search', { terminos: [surnameTerm], desde: since.toISOString(), max: 3, cuenta: OUTLOOK_ACCOUNT }, lead.id, 90_000)
-      if (found.ok && Array.isArray(found.data) && found.data.length) {
-        await enqueueCase(c.clientId, c.name)
+      // Solo si el cliente ha escrito (lo que enviamos nosotros no es novedad).
+      const received = found.ok && Array.isArray(found.data) && (found.data as Array<{ carpeta?: string }>).some((m) => m.carpeta === 'recibido')
+      if (received) {
+        await enqueueCase(c.clientId, c.name, true)
         queued.push(c.name)
       }
     }
@@ -210,4 +204,23 @@ Escribe para el humano un plan breve: por cada cliente, 2-3 líneas (estado, lo 
   } finally {
     await db.agent.updateMany({ where: { projectId, id: { in: Object.values(AGENT) } }, data: { status: 'idle' } })
   }
+}
+
+async function writePlan(leadId: string, compact: unknown): Promise<void> {
+  const response = await anthropic.messages.create({
+    model: MODELS.haiku,
+    max_tokens: 2500,
+    messages: [{
+      role: 'user',
+      content: `Eres Nova, coordinadora de una gestoría en Andorra. Hoy es ${new Date().toISOString().slice(0, 10)}. Estos son los clientes prioritarios con sus datos de GestoriaAD:
+${JSON.stringify(compact)}
+Escribe para el humano un plan breve: por cada cliente, 2-3 líneas (estado, lo más urgente y el siguiente paso concreto, y qué compañero lo lleva: Pau procesos, Vera alertas, Dora documentación, Olga correo, Clara KYC). Empieza por el cliente más urgente. Si un cliente no tiene ficha, dilo y sugiere darlo de alta. Sin introducciones.`,
+    }],
+  })
+  const text = response.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('\n')
+  const { input_tokens: inputTokens, output_tokens: outputTokens } = response.usage
+  await db.message.create({ data: { role: 'user', content: '★ Repaso de clientes prioritarios', agentId: leadId } })
+  await db.message.create({
+    data: { role: 'agent', content: text, model: 'haiku', inputTokens, outputTokens, costUsd: calcCostUsd('haiku', inputTokens, outputTokens), agentId: leadId },
+  })
 }

@@ -26,6 +26,9 @@ const LEAD_ID = 't-pm'
 const SLICE_MS = 2 * 60_000
 const STALE_MS = 6 * 60_000
 const MAX_ROUNDS = 5
+// Los que se lanzan solos (por correos nuevos) tienen tope diario: cada
+// caso cuesta ~0,5 €. Los que pide el humano no cuentan.
+const AUTO_CASES_PER_DAY = 2
 
 const CASE_GESTORIA_TOOLS = [
   'gestoria_resumen_cliente', 'gestoria_ver_cliente', 'gestoria_ver_proceso', 'gestoria_actualizar_paso',
@@ -52,15 +55,15 @@ Cómo trabajas un cliente:
 Termina con un informe breve para el humano (en español):
 **Dónde estamos** (2-3 líneas) · **Lo que he hecho** (documentos, borradores, pasos) · **Lo que necesito de ti**.`
 
-type QueueMeta = { pending: Array<{ clientId: string; name: string }> }
+type QueueMeta = { pending: Array<{ clientId: string; name: string; auto?: boolean }> }
 
-export async function enqueueCase(clientId: string, name: string): Promise<string> {
+export async function enqueueCase(clientId: string, name: string, auto = false): Promise<string> {
   const lead = await db.agent.findUnique({ where: { id: LEAD_ID } })
   if (!lead) return 'No existe el equipo de la gestoría.'
   const queue = await db.activityLog.findFirst({ where: { type: 'case_queue' }, orderBy: { createdAt: 'desc' } })
   const meta: QueueMeta = queue?.metadata ? JSON.parse(queue.metadata) : { pending: [] }
   if (meta.pending.some((p) => p.clientId === clientId)) return `${name} ya está en la cola.`
-  meta.pending.push({ clientId, name })
+  meta.pending.push({ clientId, name, auto })
   if (queue) await db.activityLog.update({ where: { id: queue.id }, data: { metadata: JSON.stringify(meta) } })
   else await db.activityLog.create({ data: { type: 'case_queue', message: 'Cola de casos', metadata: JSON.stringify(meta), agentId: lead.id, projectId: lead.projectId } })
   return `Caso de ${name} en cola: en un par de minutos lo trabajo y dejo el informe en el chat de Nova.`
@@ -84,7 +87,7 @@ export async function enqueueCaseByName(query: string): Promise<string> {
 // con el modelo, para seguir en la siguiente consulta del puente si la
 // petición se acaba (Vercel corta a los 5 minutos) o se cae a medias.
 type CaseState = {
-  clientId: string; name: string; logId: string; round: number; heartbeat: number
+  clientId: string; name: string; logId: string; round: number; heartbeat: number; auto?: boolean
   messages: Anthropic.MessageParam[]; usage: TurnUsage
 }
 const STATE_ID = 'case-state'
@@ -121,23 +124,28 @@ export async function maybeRunNextCase(): Promise<void> {
 
   const queue = await db.activityLog.findFirst({ where: { type: 'case_queue' }, orderBy: { createdAt: 'desc' } })
   const meta: QueueMeta = queue?.metadata ? JSON.parse(queue.metadata) : { pending: [] }
-  const next = meta.pending.shift()
-  if (!queue || !next) return
+  // Primero los pedidos por el humano; los automáticos, si queda cupo hoy.
+  const autoToday = await db.activityLog.count({
+    where: { type: 'case_run', metadata: { contains: '"auto":true' }, createdAt: { gte: new Date(Date.now() - 86_400_000) } },
+  })
+  const idx = meta.pending.findIndex((p) => !p.auto || autoToday < AUTO_CASES_PER_DAY)
+  if (!queue || idx === -1) return
+  const [next] = meta.pending.splice(idx, 1)
   await db.activityLog.update({ where: { id: queue.id }, data: { metadata: JSON.stringify(meta) } })
-  await runCase(next.clientId, next.name)
+  await runCase(next.clientId, next.name, next.auto)
 }
 
-export async function runCase(clientId: string, name: string): Promise<void> {
+export async function runCase(clientId: string, name: string, auto = false): Promise<void> {
   const lead = await db.agent.findUnique({ where: { id: LEAD_ID } })
   if (!lead) return
   const log = await db.activityLog.create({
     data: {
       type: 'case_run', message: `${lead.name} está trabajando el expediente de ${name}`,
-      metadata: JSON.stringify({ clientId, running: true }), agentId: lead.id, projectId: lead.projectId,
+      metadata: JSON.stringify({ clientId, running: true, auto }), agentId: lead.id, projectId: lead.projectId,
     },
   })
   const state: CaseState = {
-    clientId, name, logId: log.id, round: 1, heartbeat: Date.now(),
+    clientId, name, auto, logId: log.id, round: 1, heartbeat: Date.now(),
     messages: [{ role: 'user', content: `Trabaja el expediente de ${name} (id en GestoriaAD: ${clientId}).` }],
     usage: { inputTokens: 0, outputTokens: 0, cacheWriteTokens: 0, cacheReadTokens: 0 },
   }
@@ -158,7 +166,7 @@ async function work(state: CaseState, lead: { id: string; name: string; projectI
     cacheWriteTokens: before.cacheWriteTokens + u.cacheWriteTokens, cacheReadTokens: before.cacheReadTokens + u.cacheReadTokens,
   })
   const finish = async (message: string, costUsd?: number) => {
-    await db.activityLog.update({ where: { id: logId }, data: { message, metadata: JSON.stringify({ clientId, running: false, costUsd }) } })
+    await db.activityLog.update({ where: { id: logId }, data: { message, metadata: JSON.stringify({ clientId, running: false, auto: state.auto, costUsd }) } })
     await db.activityLog.deleteMany({ where: { id: STATE_ID } })
   }
 
@@ -170,7 +178,7 @@ async function work(state: CaseState, lead: { id: string; name: string; projectI
       tools,
       agentId: lead.id,
       maxTokens: 12000,
-      maxSteps: 25,
+      maxSteps: 20,
       deadline: Date.now() + SLICE_MS,
       onStep: (messages, usage) => saveState({ ...state, heartbeat: Date.now(), messages, usage: total(usage) }, lead.projectId),
     })
