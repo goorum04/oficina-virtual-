@@ -4,6 +4,7 @@ import { NextResponse, after } from 'next/server'
 import { maybeReviewMail } from '@/lib/mail-review'
 import { maybeRunFocus } from '@/lib/focus'
 import { maybeRunNextCase } from '@/lib/case-worker'
+import { isOffHours } from '@/lib/work-hours'
 
 // La revisión automática del correo corre tras responder (after) y puede
 // durar unos minutos.
@@ -27,9 +28,15 @@ export async function POST(req: Request) {
 
   // El puente pregunta sin parar mientras el PC está encendido: se aprovecha
   // como reloj para revisar el correo cada cierto tiempo (ver mail-review).
-  after(() => maybeReviewMail().catch((e) => console.error('[mail-review]', e)))
-  after(() => maybeRunFocus().catch((e) => console.error('[focus]', e)))
-  after(() => maybeRunNextCase().catch((e) => console.error('[case]', e)))
+  // De 20:00 a 8:00 todos duermen: nada automático (un caso a medias se
+  // retoma por la mañana). Las órdenes que pida el humano sí se atienden.
+  if (isOffHours()) {
+    after(() => db.agent.updateMany({ where: { status: { not: 'idle' } }, data: { status: 'idle' } }).catch(() => {}))
+  } else {
+    after(() => maybeReviewMail().catch((e) => console.error('[mail-review]', e)))
+    after(() => maybeRunFocus().catch((e) => console.error('[focus]', e)))
+    after(() => maybeRunNextCase().catch((e) => console.error('[case]', e)))
+  }
 
   const deadline = Date.now() + WAIT_MS
   while (true) {

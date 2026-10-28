@@ -17,6 +17,7 @@ import { Separator } from '@/components/ui/separator'
 const Scene3D = dynamic(() => import('@/components/office/Scene3D'), { ssr: false })
 import type { Agent3D } from '@/components/office/Scene3D'
 import Markdown from '@/components/office/Markdown'
+import { isOffHours, WORK_START_HOUR } from '@/lib/work-hours'
 
 /* ═══════════════════════ TYPES ═══════════════════════ */
 interface Task { id: string; title: string; description?: string; status: string; priority: string; progress: number; agentId?: string | null; agent?: { id: string; name: string; avatar: string } | null }
@@ -398,6 +399,7 @@ export default function VirtualOffice() {
 
   /* ---- Stats ---- */
   const workingCount = currentProject?.agents.filter(a => a.status === 'working').length || 0
+  const sleeping = isOffHours()
   const restingCount = allAgents.filter(a => a.status === 'idle' && !(a.tasks || []).some(t => t.status === 'in_progress')).length || 0
   const totalTasks = currentProject?.tasks.length || 0
   const completedTasks = currentProject?.tasks.filter(t => t.status === 'completed').length || 0
@@ -518,7 +520,15 @@ export default function VirtualOffice() {
                 <Activity className="w-3.5 h-3.5 text-emerald-400" />
                 <span className="text-emerald-400 font-semibold">{workingCount}</span>
               </div>
-              {restingCount > 0 && (
+              {sleeping ? (
+                <>
+                  <div className="w-px h-4 bg-white/10" />
+                  <div className="flex items-center gap-1.5 text-xs" title="De 20:00 a 8:00 no trabajan por su cuenta">
+                    <span className="text-sm">😴</span>
+                    <span className="text-indigo-300/90 font-medium">Durmiendo hasta las {WORK_START_HOUR}:00</span>
+                  </div>
+                </>
+              ) : restingCount > 0 && (
                 <>
                   <div className="w-px h-4 bg-white/10" />
                   <div className="flex items-center gap-1.5 text-xs">
