@@ -35,29 +35,76 @@ function today(): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Andorra' }).format(new Date())
 }
 
-// Cada trabajo se anota al empezar: una vez al día aunque el puente pregunte
-// cada 20 segundos.
-async function claimToday(type: string): Promise<boolean> {
-  const last = await db.activityLog.findFirst({ where: { type }, orderBy: { createdAt: 'desc' } })
-  if (last && new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Andorra' }).format(last.createdAt) === today()) return false
-  const lead = await db.agent.findUnique({ where: { id: LEAD_ID }, select: { projectId: true } })
-  if (!lead) return false
-  await db.activityLog.create({ data: { type, message: type, projectId: lead.projectId, agentId: LEAD_ID } })
-  return true
+// Estado de cada trabajo del día (una fila por tipo y día). Una petición a
+// Vercel dura como mucho 5 minutos y buscar los correos de un cliente tarda
+// unos segundos, así que los trabajos largos van por tandas de SLICE_MS y
+// la siguiente consulta del puente sigue donde se quedó (cursor).
+type JobState = { date: string; finished: boolean; failed?: number; heartbeat: number; cursor: number; out: string[]; extra: string[]; costUsd: number }
+type Job = { id: string; raw: string; state: JobState }
+
+const SLICE_MS = 150_000
+const STALE_MS = 4 * 60_000 // tanda cortada sin avisar: se retoma
+const RETRY_MS = 30 * 60_000 // falló (p. ej. puente antiguo): se reintenta
+const MAX_TRIES = 4
+
+async function acquire(type: string): Promise<Job | null> {
+  const date = today()
+  const row = await db.activityLog.findFirst({ where: { type }, orderBy: { createdAt: 'desc' } })
+  let state: JobState | null = null
+  try { state = row?.metadata ? (JSON.parse(row.metadata) as JobState) : null } catch { state = null }
+  const now = Date.now()
+  if (!row || !state || state.date !== date) {
+    const lead = await db.agent.findUnique({ where: { id: LEAD_ID }, select: { projectId: true } })
+    if (!lead) return null
+    const fresh: JobState = { date, finished: false, heartbeat: now, cursor: 0, out: [], extra: [], costUsd: 0 }
+    const created = await db.activityLog.create({ data: { type, message: type, metadata: JSON.stringify(fresh), projectId: lead.projectId, agentId: LEAD_ID } })
+    return { id: created.id, raw: created.metadata!, state: fresh }
+  }
+  if (state.finished) return null
+  if (state.failed) {
+    if (state.failed >= MAX_TRIES || now - state.heartbeat < RETRY_MS) return null
+  } else if (now - state.heartbeat < STALE_MS) return null
+  // Reclamo atómico: si otra consulta del puente lo cogió antes, nada.
+  const next: JobState = { ...state, heartbeat: now }
+  const claimed = await db.activityLog.updateMany({ where: { id: row.id, metadata: row.metadata! }, data: { metadata: JSON.stringify(next) } })
+  return claimed.count ? { id: row.id, raw: JSON.stringify(next), state: next } : null
 }
 
-async function finishJob(type: string, message: string): Promise<void> {
-  const row = await db.activityLog.findFirst({ where: { type }, orderBy: { createdAt: 'desc' } })
-  if (row) await db.activityLog.update({ where: { id: row.id }, data: { message } })
+async function save(job: Job, message?: string): Promise<void> {
+  await db.activityLog.update({ where: { id: job.id }, data: { metadata: JSON.stringify(job.state), ...(message ? { message } : {}) } })
 }
 
 export async function maybeDailyJobs(aiAllowed = true): Promise<void> {
   if (!gestoriaConfigured() || !officeProtected() || !pcConfigured()) return
   if (andorraHour() < START_HOUR) return
-  if (await claimToday('calendar_sync')) await syncCalendar().catch((e) => finishJob('calendar_sync', `Agenda: error ${e instanceof Error ? e.message : ''}`))
-  if (await claimToday('doc_chasers')) await docChasers().catch((e) => finishJob('doc_chasers', `Recordatorios: error ${e instanceof Error ? e.message : ''}`))
+  const cal = await acquire('calendar_sync')
+  if (cal) await syncCalendar(cal)
+  const chase = await acquire('doc_chasers')
+  if (chase) await docChasers(chase)
   const monday = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Andorra', weekday: 'short' }).format(new Date()) === 'Mon'
-  if (aiAllowed && monday && (await claimToday('status_reports'))) await statusReports().catch((e) => finishJob('status_reports', `Estado del trámite: error ${e instanceof Error ? e.message : ''}`))
+  if (aiAllowed && monday) {
+    const status = await acquire('status_reports')
+    if (status) await statusReports(status)
+  }
+}
+
+// Recorre los clientes desde el cursor durante una tanda; devuelve true si
+// ha terminado la lista.
+async function walk(job: Job, max: number, step: (c: Client) => Promise<void>): Promise<boolean> {
+  const clients = (await activeClients()).sort((x, y) => x.id.localeCompare(y.id))
+  const deadline = Date.now() + SLICE_MS
+  while (job.state.cursor < clients.length && job.state.out.length < max) {
+    if (Date.now() > deadline) {
+      job.state.heartbeat = 0 // la siguiente consulta del puente sigue
+      await save(job)
+      return false
+    }
+    await step(clients[job.state.cursor]).catch(() => {})
+    job.state.cursor++
+    job.state.heartbeat = Date.now()
+    await save(job)
+  }
+  return true
 }
 
 async function activeClients(): Promise<Client[]> {
@@ -81,37 +128,34 @@ async function mailsWith(c: Client, days: number): Promise<Mail[]> {
 const latest = (mails: Mail[], carpeta: string) => mails.filter((m) => m.carpeta === carpeta).map((m) => new Date(String(m.fecha)).getTime()).filter(Number.isFinite).sort((a, b) => b - a)[0]
 
 // ── Recordatorios de documentación ────────────────────────────────────────
-async function docChasers(): Promise<void> {
-  const done: string[] = []
-  const stuck: string[] = []
-  for (const c of await activeClients()) {
-    if (done.length >= MAX_CHASERS_PER_DAY) break
+async function docChasers(job: Job): Promise<void> {
+  const finished = await walk(job, MAX_CHASERS_PER_DAY, async (c) => {
     const missing = await gestoriaFetch('GET', `/api/clients/${c.id}/request-missing`)
     const items = missing.ok ? ((missing.data as { items?: unknown[] }).items ?? []) : []
-    if (!items.length) continue
+    if (!items.length) return
 
     const previous = await db.activityLog.findMany({
       where: { type: 'doc_chaser', metadata: { contains: c.id }, createdAt: { gte: new Date(Date.now() - 60 * 86_400_000) } },
       orderBy: { createdAt: 'desc' },
     })
-    if (previous[0] && Date.now() - previous[0].createdAt.getTime() < CHASE_AFTER_DAYS * 86_400_000) continue
+    if (previous[0] && Date.now() - previous[0].createdAt.getTime() < CHASE_AFTER_DAYS * 86_400_000) return
 
     const mails = await mailsWith(c, 60)
     const sent = latest(mails, 'enviado')
     const received = latest(mails, 'recibido')
     // Solo si ya se le pidió (correo nuestro), hace una semana o más, y no
     // ha contestado desde entonces.
-    if (!sent || Date.now() - sent < CHASE_AFTER_DAYS * 86_400_000 || (received && received > sent)) continue
+    if (!sent || Date.now() - sent < CHASE_AFTER_DAYS * 86_400_000 || (received && received > sent)) return
     if (previous.length >= MAX_CHASERS) {
-      stuck.push(`${c.firstName} ${c.lastName}`)
-      continue
+      job.state.extra.push(`${c.firstName} ${c.lastName}`)
+      return
     }
 
     const level = previous.length + 1
     const l = lang(c)
     let draft = await gestoriaFetch('POST', `/api/clients/${c.id}/request-missing`, { lang: l, includeUploadLink: true })
     if (!draft.ok) draft = await gestoriaFetch('POST', `/api/clients/${c.id}/request-missing`, { lang: l })
-    if (!draft.ok) continue
+    if (!draft.ok) return
     const { subject, body } = draft.data as { subject: string; body: string }
     const intro = l === 'fr'
       ? (level === 1 ? 'Je me permets de revenir vers vous concernant votre dossier.' : 'Sans retour de votre part, je vous relance car votre dossier est en attente de ces éléments pour avancer.')
@@ -125,21 +169,21 @@ async function docChasers(): Promise<void> {
         data: { type: 'doc_chaser', message: `Dora preparó el recordatorio ${level} de documentación a ${c.firstName} ${c.lastName}`, metadata: JSON.stringify({ clientId: c.id, level }), agentId: DOC_AGENT, projectId: lead.projectId },
       })
     }
-    done.push(`${c.firstName} ${c.lastName} (${level}º)`)
-  }
-  await finishJob('doc_chasers', `Dora: ${done.length ? `recordatorios de documentación para ${done.join(', ')}` : 'ningún recordatorio hoy'}${stuck.length ? `; sin respuesta tras ${MAX_CHASERS} recordatorios (mejor llamar): ${stuck.join(', ')}` : ''}`)
+    job.state.out.push(`${c.firstName} ${c.lastName} (${level}º)`)
+  })
+  if (!finished) return
+  job.state.finished = true
+  const { out, extra } = job.state
+  await save(job, `Dora: ${out.length ? `recordatorios de documentación para ${out.join(', ')}` : 'ningún recordatorio hoy'}${extra.length ? `; sin respuesta tras ${MAX_CHASERS} recordatorios (mejor llamar): ${extra.join(', ')}` : ''}`)
 }
 
 // ── Estado del trámite (lunes) ────────────────────────────────────────────
-async function statusReports(): Promise<void> {
-  const done: string[] = []
-  let costUsd = 0
-  for (const c of await activeClients()) {
-    if (done.length >= MAX_STATUS_PER_WEEK) break
+async function statusReports(job: Job): Promise<void> {
+  const finished = await walk(job, MAX_STATUS_PER_WEEK, async (c) => {
     const mails = await mailsWith(c, STATUS_SILENCE_DAYS)
-    if (mails.length) continue // ha habido contacto hace poco
+    if (mails.length) return // ha habido contacto hace poco
     const briefing = await clientBriefing(`${c.firstName} ${c.lastName}`, c.id).catch(() => null)
-    if (!briefing) continue
+    if (!briefing) return
     const response = await anthropic.messages.create({
       model: MODELS.haiku,
       max_tokens: 700,
@@ -150,24 +194,27 @@ ${JSON.stringify(briefing).slice(0, 5000)}
 Responde SOLO con JSON: {"asunto":"…","texto":"…"}`,
       }],
     })
-    costUsd += calcCostUsd('haiku', response.usage.input_tokens, response.usage.output_tokens)
+    job.state.costUsd += calcCostUsd('haiku', response.usage.input_tokens, response.usage.output_tokens)
     const text = response.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('')
     let out: { asunto?: string; texto?: string } = {}
-    try { out = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) } catch { continue }
-    if (!out.texto) continue
+    try { out = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) } catch { return }
+    if (!out.texto) return
     await saveDraft({ para: c.email, asunto: out.asunto || (lang(c) === 'fr' ? 'Point sur votre dossier' : 'Estado de su expediente'), texto: out.texto }, LEAD_ID, `${c.firstName} ${c.lastName}`)
-    done.push(`${c.firstName} ${c.lastName}`)
-  }
+    job.state.out.push(`${c.firstName} ${c.lastName}`)
+  })
+  if (!finished) return
+  job.state.finished = true
+  const { out, costUsd } = job.state
   if (costUsd) {
     await db.message.create({
-      data: { role: 'agent', model: 'haiku', costUsd, agentId: LEAD_ID, content: `📨 Correos de "así va su trámite" preparados para: ${done.join(', ')} (en "Para revisar").` },
+      data: { role: 'agent', model: 'haiku', costUsd, agentId: LEAD_ID, content: `📨 Correos de "así va su trámite" preparados para: ${out.join(', ') || 'nadie'} (en "Para revisar").` },
     })
   }
-  await finishJob('status_reports', `Nova: ${done.length ? `estado del trámite para ${done.join(', ')}` : 'nadie sin noticias esta semana'}`)
+  await save(job, `Nova: ${out.length ? `estado del trámite para ${out.join(', ')}` : 'nadie sin noticias esta semana'}`)
 }
 
 // ── Agenda ────────────────────────────────────────────────────────────────
-async function syncCalendar(): Promise<void> {
+async function syncCalendar(job: Job): Promise<void> {
   const until = Date.now() + CALENDAR_DAYS * 86_400_000
   const from = Date.now() - 86_400_000
   const inRange = (d?: string | null) => !!d && new Date(d).getTime() >= from && new Date(d).getTime() <= until
@@ -187,5 +234,8 @@ async function syncCalendar(): Promise<void> {
     }
   }
   const res = await runPcCommand('cal_sync', { eventos: events.slice(0, 80), cuenta: OUTLOOK_ACCOUNT }, LEAD_ID, 120_000)
-  await finishJob('calendar_sync', res.ok ? `Agenda: ${typeof res.data === 'string' ? res.data : JSON.stringify(res.data)}` : `Agenda: no se pudo sincronizar (${String(res.data).slice(0, 150)})`)
+  if (res.ok) job.state.finished = true
+  else job.state.failed = (job.state.failed ?? 0) + 1
+  job.state.heartbeat = Date.now()
+  await save(job, res.ok ? `Agenda: ${typeof res.data === 'string' ? res.data : JSON.stringify(res.data)}` : `Agenda: no se pudo sincronizar (${String(res.data).slice(0, 150)})`)
 }
