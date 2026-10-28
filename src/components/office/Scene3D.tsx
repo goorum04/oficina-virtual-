@@ -9,6 +9,14 @@ import * as THREE from 'three'
 export interface Agent3D {
   id: string; name: string; role: string; avatar: string; brain?: string; isSpokesperson?: boolean
   status: string; tasks: { id: string; title: string; status: string; progress: number; priority: string }[]
+  // Lo que está haciendo ahora mismo (bocadillo encima de su mesa).
+  activity?: string | null
+}
+
+// Solo está en su mesa quien está haciendo algo de verdad ahora; el resto
+// descansa (tener tareas abiertas no es estar trabajando).
+export function isBusy(agent: Agent3D): boolean {
+  return !!agent.activity || agent.status === 'working' || agent.status === 'thinking'
 }
 
 /* ═══════════════════ PALETTES ═════════════════ */
@@ -893,6 +901,25 @@ function AvatarMarker({ agent, position, onClick }: {
   )
 }
 
+/* ═══════════════════ BOCADILLO: qué está haciendo ═════════════════ */
+function ActivityBubble({ text, position }: { text: string; position: [number, number, number] }) {
+  return (
+    <Html position={position} center zIndexRange={[20, 0]} style={{ pointerEvents: 'none' }}>
+      <div style={{
+        maxWidth: 220, padding: '6px 10px', borderRadius: 10, background: 'rgba(255,255,255,0.97)',
+        color: '#0f172a', fontSize: 11, fontFamily: 'system-ui', fontWeight: 600, lineHeight: 1.3,
+        boxShadow: '0 6px 18px rgba(15,23,42,0.25)', border: '1px solid #e2e8f0',
+        display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'normal', width: 'max-content',
+      }}>
+        <span className="activity-dots" style={{ display: 'inline-flex', gap: 2, flexShrink: 0 }}>
+          <i /><i /><i />
+        </span>
+        <span>{text}</span>
+      </div>
+    </Html>
+  )
+}
+
 /* ═══════════════════ WORKSTATION (desk + chair + agent + floor zone) ═════════════════ */
 function Workstation({ agent, deskPos, chairPos, rotation, onClick }: {
   agent: Agent3D; deskPos: [number, number, number]; chairPos: [number, number, number]
@@ -911,6 +938,7 @@ function Workstation({ agent, deskPos, chairPos, rotation, onClick }: {
       <Desk position={deskPos} rotation={rotation} status={agent.status} />
       <Chair position={chairPos} rotation={rotation} />
       <AgentCharacter agent={agent} position={[chairPos[0], 0, chairPos[2]]} deskRotation={rotation} onClick={onClick} scale={1.35} />
+      {agent.activity && <ActivityBubble text={agent.activity} position={[chairPos[0], 2.55, chairPos[2]]} />}
     </group>
   )
 }
@@ -1109,6 +1137,7 @@ function ExecutiveWorkstation({ agent, onClick }: { agent: Agent3D; onClick?: ()
       <ExecutiveDesk position={EXEC_DESK} rotation={0} status={agent.status} />
       <ExecutiveChair position={EXEC_CHAIR} rotation={0} />
       <AgentCharacter agent={agent} position={[EXEC_CHAIR[0], 0, EXEC_CHAIR[2]]} deskRotation={0} onClick={onClick} scale={1.4} />
+      {agent.activity && <ActivityBubble text={agent.activity} position={[EXEC_CHAIR[0], 2.6, EXEC_CHAIR[2]]} />}
     </group>
   )
 }
@@ -1721,6 +1750,7 @@ const REST_POSITIONS: { pos: [number, number, number]; rot: number; activity: 't
   { pos: [-5.4, 0, 3.2], rot: 0, activity: 'tv' },
   { pos: [-4.6, 0, 3.2], rot: 0, activity: 'tv' },
   { pos: [-5.8, 0, 4.0], rot: 0, activity: 'tv' },
+  { pos: [-4.2, 0, 4.0], rot: 0, activity: 'tv' },
   // Gaming - 2 bean bags facing left wall screen
   { pos: [-6.3, 0, 4.8], rot: -Math.PI / 2, activity: 'gaming' },
   { pos: [-6.9, 0, 3.9], rot: -Math.PI / 3, activity: 'gaming' },
@@ -1982,7 +2012,19 @@ export default function OfficeScene({
       ) : (
         <>
           {/* ═══ NORMAL MODE ═══ */}
-          {lead && <ExecutiveWorkstation agent={lead} onClick={() => onAgentClick?.(lead)} />}
+          {lead && isBusy(lead) && <ExecutiveWorkstation agent={lead} onClick={() => onAgentClick?.(lead)} />}
+          {lead && !isBusy(lead) && (
+            <>
+              <ExecutiveDesk position={EXEC_DESK} rotation={0} />
+              <ExecutiveChair position={EXEC_CHAIR} rotation={0} />
+              <RestAgent
+                agent={lead}
+                deskPos={EXEC_CHAIR}
+                restSpot={REST_POSITIONS[(staff.filter(a => !isBusy(a)).length + restRotation) % REST_POSITIONS.length]}
+                onClick={() => onAgentClick?.(lead)}
+              />
+            </>
+          )}
           {!lead && (
             <>
               <ExecutiveDesk position={EXEC_DESK} rotation={0} />
@@ -1991,15 +2033,13 @@ export default function OfficeScene({
           )}
           {staff.map((agent, i) => {
             const layout = deskLayout[i % deskLayout.length]
-            // Con tareas en curso se queda en su mesa trabajando, aunque no esté
-            // respondiendo a nadie en este momento.
-            const isIdle = agent.status === 'idle' && !agent.tasks.some(t => t.status === 'in_progress')
+            const isIdle = !isBusy(agent)
 
             if (isIdle) {
               // Calculate which rest spot this idle agent gets — rotates
               // over time (restRotation) so idle agents cycle through
               // different activities instead of freezing in one spot.
-              const idleAgentsBefore = staff.slice(0, i).filter(a => a.status === 'idle').length
+              const idleAgentsBefore = staff.slice(0, i).filter(a => !isBusy(a)).length
               const restSpot = REST_POSITIONS[(idleAgentsBefore + restRotation) % REST_POSITIONS.length]
 
               return (

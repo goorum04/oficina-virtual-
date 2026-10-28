@@ -6,6 +6,7 @@ import { caseMailTools, OUTLOOK_ACCOUNT } from '@/lib/mail-tools'
 import { pcToolsFor } from '@/lib/pc-tools'
 import { pcConfigured } from '@/lib/pc'
 import { runAgentTurn, type TurnUsage } from '@/lib/agent-turn'
+import { clearActivity } from '@/lib/activity'
 import { MODELS } from '@/lib/model-router'
 import { calcCostUsd } from '@/lib/pricing'
 
@@ -183,6 +184,7 @@ async function work(state: CaseState, lead: { id: string; name: string; projectI
       maxSteps: 20,
       deadline: Date.now() + SLICE_MS,
       onStep: (messages, usage) => saveState({ ...state, heartbeat: Date.now(), messages, usage: total(usage) }, lead.projectId),
+      activityLabel: `Expediente de ${name}`,
     })
     const usage = total(res)
     const costUsd = calcCostUsd('sonnet', usage.inputTokens, usage.outputTokens, usage.cacheWriteTokens, usage.cacheReadTokens)
@@ -205,5 +207,7 @@ async function work(state: CaseState, lead: { id: string; name: string; projectI
     await finish(`${lead.name} trabajó el expediente de ${name} (informe en su chat)`, costUsd)
   } catch (err) {
     await finish(`${lead.name} no pudo trabajar el expediente de ${name}: ${err instanceof Error ? err.message : 'error'}`)
+  } finally {
+    await clearActivity(lead.id)
   }
 }

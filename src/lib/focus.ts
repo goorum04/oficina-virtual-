@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import { clearActivities, setActivities } from '@/lib/activity'
 import { db } from '@/lib/db'
 import { anthropic } from '@/lib/anthropic'
 import { officeProtected } from '@/lib/access'
@@ -147,7 +148,7 @@ export async function runFocusReview(): Promise<{ ok: boolean; message: string }
   const log = await db.activityLog.create({
     data: { type: 'focus_review', message: `${lead.name} repasa los clientes prioritarios`, agentId: lead.id, projectId },
   })
-  await db.agent.updateMany({ where: { projectId, id: { in: Object.values(AGENT) } }, data: { status: 'working' } })
+  await setActivities(Object.values(AGENT), 'Repaso de clientes prioritarios')
 
   try {
     const clients = await focusClients()
@@ -234,7 +235,7 @@ export async function runFocusReview(): Promise<{ ok: boolean; message: string }
     await db.activityLog.update({ where: { id: log.id }, data: { message } })
     return { ok: false, message }
   } finally {
-    await db.agent.updateMany({ where: { projectId, id: { in: Object.values(AGENT) } }, data: { status: 'idle' } })
+    await clearActivities(Object.values(AGENT))
   }
 }
 

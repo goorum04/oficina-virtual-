@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { clearActivity, setActivity } from '@/lib/activity'
 import { anthropic } from '@/lib/anthropic'
 import { officeProtected } from '@/lib/access'
 import { gestoriaConfigured, gestoriaFetch } from '@/lib/gestoria'
@@ -179,7 +180,7 @@ export async function maybeReviewMail(): Promise<void> {
     return
   }
 
-  await db.agent.update({ where: { id: agent.id }, data: { status: 'working' } })
+  await setActivity(agent.id, `Revisando ${pending.length} correo(s) nuevo(s)`)
   try {
     const [processes, tasks, alertTitles, clients] = await Promise.all([activeProcesses(), openTaskTitles(), unreadAlertTitles(), clientEmails()])
     const repliesToday = await db.activityLog.count({ where: { type: 'auto_reply', createdAt: { gte: new Date(Date.now() - 24 * 3600_000) } } })
@@ -232,6 +233,7 @@ ${pending.map((m, i) => `#${i + 1} | ${m.recibido} | De: ${m.de} <${m.email}> (c
         const full = await runPcCommand('mail_read', { id: mail.id, cuenta: OUTLOOK_ACCOUNT }, agent.id, 60_000)
         const mailText = full.ok ? String((full.data as { texto?: string })?.texto || mail.extracto || '') : String(mail.extracto || '')
         const briefing = await clientBriefing(client.name, client.id).catch(() => null)
+        await setActivity(agent.id, `Contestando a ${client.name}`)
         const reply = await composeReply(`De: ${mail.de} <${mail.email}>\nAsunto: ${mail.asunto}\n\n${mailText}`, briefing)
         extraUsd += reply.costUsd
         if (reply.texto) {
@@ -263,6 +265,7 @@ ${pending.map((m, i) => `#${i + 1} | ${m.recibido} | De: ${m.de} <${m.email}> (c
         newClients++
         const full = await runPcCommand('mail_read', { id: mail.id, cuenta: OUTLOOK_ACCOUNT }, agent.id, 60_000)
         const mailText = full.ok ? String((full.data as { texto?: string })?.texto || mail.extracto || '') : String(mail.extracto || '')
+        await setActivity(agent.id, `Respondiendo a un posible cliente: ${mail.de}`)
         const welcome = await composeWelcome(`De: ${mail.de} <${mail.email}>\nAsunto: ${mail.asunto}\n\n${mailText}`)
         extraUsd += welcome.costUsd
         const name = [d.nombre, d.apellidos].filter(Boolean).join(' ') || String(mail.de || mail.email)
@@ -316,8 +319,9 @@ ${pending.map((m, i) => `#${i + 1} | ${m.recibido} | De: ${m.de} <${m.email}> (c
     })
     const firstLine = resumen.split('\n').find((l) => l.trim())?.replace(/[*#]/g, '').trim() || ''
     await finish(`${agent.name} revisó ${pending.length} correo(s)${done.length ? ` y creó ${done.length} aviso(s)` : ''}: ${firstLine.slice(0, 140)}`)
-    await db.agent.update({ where: { id: agent.id }, data: { status: 'idle' } })
+    await clearActivity(agent.id)
   } catch (err) {
+    await clearActivity(agent.id)
     await db.agent.update({ where: { id: agent.id }, data: { status: 'error' } })
     await finish(`${agent.name} falló al revisar el correo: ${err instanceof Error ? err.message : 'desconocido'}`)
   }

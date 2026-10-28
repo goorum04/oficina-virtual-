@@ -1,5 +1,6 @@
 import { db } from '@/lib/db'
 import { NextResponse } from 'next/server'
+import { HIDDEN_LOG_TYPES } from '@/lib/activity'
 
 export async function GET(
   _req: Request,
@@ -24,6 +25,7 @@ export async function GET(
         orderBy: { createdAt: 'desc' },
       },
       logs: {
+        where: { type: { notIn: HIDDEN_LOG_TYPES } },
         include: {
           agent: { select: { id: true, name: true, avatar: true } },
           task: { select: { id: true, title: true } },

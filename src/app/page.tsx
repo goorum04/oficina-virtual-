@@ -31,7 +31,7 @@ interface ProjectDetail extends Project {
   tasks: (Task & { agent?: { id: string; name: string; avatar: string } | null })[]
   logs: ActivityLog[]
 }
-interface Agent { id: string; name: string; role: string; function?: string | null; avatar: string; brain?: string; status: string; isSpokesperson?: boolean; githubRepo?: string | null; tasks?: Task[] }
+interface Agent { id: string; name: string; role: string; function?: string | null; avatar: string; brain?: string; status: string; isSpokesperson?: boolean; githubRepo?: string | null; tasks?: Task[]; activity?: string | null }
 interface MessageAttachment { id: string; filename: string; mimeType: string }
 interface ChatMessage { id: string; role: string; content: string; model?: string | null; costUsd?: number | null; createdAt: string; attachments?: MessageAttachment[] }
 interface PendingAttachment { filename: string; mimeType: string; data: string }
@@ -119,6 +119,34 @@ export default function VirtualOffice() {
     } catch { }
     setLoading(false)
   }, [])
+
+  /* ---- Estado en vivo (sin WebSocket en Vercel): cada 5 s qué hace cada
+     agente, y cada 20 s la actividad reciente ---- */
+  useEffect(() => {
+    if (!projects.length) return
+    const tick = async () => {
+      const lists = await Promise.all(projects.map(p => fetch(`/api/projects/${p.id}/live`).then(r => (r.ok ? r.json() : [])).catch(() => [])))
+      const live = new Map<string, { status: string; activity: string | null }>(lists.flat().map((a: { id: string; status: string; activity: string | null }) => [a.id, a]))
+      const merge = <T extends Agent>(a: T): T => {
+        const l = live.get(a.id)
+        return l && (l.status !== a.status || l.activity !== (a.activity ?? null)) ? { ...a, status: l.status, activity: l.activity } : a
+      }
+      setAllAgents(prev => prev.map(merge))
+      setCurrentProject(prev => (prev ? { ...prev, agents: prev.agents.map(merge) } : prev))
+    }
+    tick()
+    const t = setInterval(tick, 5_000)
+    return () => clearInterval(t)
+  }, [projects])
+
+  useEffect(() => {
+    const id = currentProject?.id
+    if (!id) return
+    const t = setInterval(() => {
+      fetch(`/api/projects/${id}/activity`).then(r => (r.ok ? r.json() : null)).then(d => { if (Array.isArray(d)) setLogs(d) }).catch(() => {})
+    }, 20_000)
+    return () => clearInterval(t)
+  }, [currentProject?.id])
 
   /* ---- WebSocket ---- */
   useEffect(() => {
@@ -403,13 +431,14 @@ export default function VirtualOffice() {
   /* ---- 3D agents (ALL agents from all projects) ---- */
   const agents3D: Agent3D[] = allAgents.map(a => ({
     id: a.id, name: a.name, role: a.role, avatar: a.avatar, brain: a.brain, isSpokesperson: a.isSpokesperson,
-    status: a.status, tasks: (a.tasks || []).map(t => ({ id: t.id, title: t.title, status: t.status, progress: t.progress, priority: t.priority })),
+    status: a.status, activity: a.activity ?? null, tasks: (a.tasks || []).map(t => ({ id: t.id, title: t.title, status: t.status, progress: t.progress, priority: t.priority })),
   }))
 
   /* ---- Stats ---- */
-  const workingCount = currentProject?.agents.filter(a => a.status === 'working').length || 0
+  const workingCount = allAgents.filter(a => a.activity || ['working', 'thinking'].includes(a.status)).length
   const sleeping = isOffHours()
-  const restingCount = allAgents.filter(a => a.status === 'idle' && !(a.tasks || []).some(t => t.status === 'in_progress')).length || 0
+  // En su mesa solo quien está haciendo algo ahora; el resto, descansando.
+  const restingCount = allAgents.filter(a => !a.activity && !['working', 'thinking'].includes(a.status)).length || 0
   const totalTasks = currentProject?.tasks.length || 0
   const completedTasks = currentProject?.tasks.filter(t => t.status === 'completed').length || 0
   const avgProgress = totalTasks > 0 ? Math.round(currentProject!.tasks.reduce((s, t) => s + t.progress, 0) / totalTasks) : 0
