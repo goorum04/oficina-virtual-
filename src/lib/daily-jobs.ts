@@ -1,4 +1,5 @@
 import { db } from '@/lib/db'
+import { clearActivity, setActivity } from '@/lib/activity'
 import { anthropic } from '@/lib/anthropic'
 import { gestoriaConfigured, gestoriaFetch } from '@/lib/gestoria'
 import { officeProtected } from '@/lib/access'
@@ -79,17 +80,20 @@ export async function maybeDailyJobs(aiAllowed = true): Promise<void> {
   if (!gestoriaConfigured() || !officeProtected() || !pcConfigured()) return
   if (andorraHour() < START_HOUR) return
   const cal = await acquire('calendar_sync')
-  if (cal) await syncCalendar(cal)
+  if (cal) {
+    await setActivity(LEAD_ID, 'Pasando las fechas de GestoriaAD a la agenda de Outlook')
+    await syncCalendar(cal).finally(() => clearActivity(LEAD_ID))
+  }
   const chase = await acquire('doc_chasers')
-  if (chase) await docChasers(chase)
+  if (chase) await docChasers(chase).finally(() => clearActivity(DOC_AGENT))
   if (aiAllowed) {
     const odm = await acquire('odm_dates')
-    if (odm) await odmDates(odm)
+    if (odm) await odmDates(odm).finally(() => clearActivity('t-cli'))
   }
   const monday = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Andorra', weekday: 'short' }).format(new Date()) === 'Mon'
   if (aiAllowed && monday) {
     const status = await acquire('status_reports')
-    if (status) await statusReports(status)
+    if (status) await statusReports(status).finally(() => clearActivity(LEAD_ID))
   }
 }
 
@@ -135,6 +139,7 @@ const latest = (mails: Mail[], carpeta: string) => mails.filter((m) => m.carpeta
 // ── Recordatorios de documentación ────────────────────────────────────────
 async function docChasers(job: Job): Promise<void> {
   const finished = await walk(job, MAX_CHASERS_PER_DAY, async (c) => {
+    await setActivity(DOC_AGENT, `Mirando la documentación pendiente de ${c.firstName} ${c.lastName}`)
     const missing = await gestoriaFetch('GET', `/api/clients/${c.id}/request-missing`)
     const items = missing.ok ? ((missing.data as { items?: unknown[] }).items ?? []) : []
     if (!items.length) return
@@ -185,6 +190,7 @@ async function docChasers(job: Job): Promise<void> {
 // ── Estado del trámite (lunes) ────────────────────────────────────────────
 async function statusReports(job: Job): Promise<void> {
   const finished = await walk(job, MAX_STATUS_PER_WEEK, async (c) => {
+    await setActivity(LEAD_ID, `Estado del trámite de ${c.firstName} ${c.lastName}`)
     const mails = await mailsWith(c, STATUS_SILENCE_DAYS)
     if (mails.length) return // ha habido contacto hace poco
     const briefing = await clientBriefing(`${c.firstName} ${c.lastName}`, c.id).catch(() => null)
@@ -230,6 +236,7 @@ async function odmDates(job: Job): Promise<void> {
       await save(job)
       return
     }
+    await setActivity('t-cli', `Buscando la ODM de ${c.firstName} ${c.lastName}`)
     const r = await findOdmDate(c, folders).catch(() => ({ line: null, costUsd: 0 }))
     job.state.costUsd += r.costUsd
     if (r.line) ('saved' in r && r.saved ? job.state.out : job.state.extra).push(r.line)

@@ -1,3 +1,4 @@
+import { clearActivity } from '@/lib/activity'
 import { db } from '@/lib/db'
 import { getInstallationOctokit } from '@/lib/github'
 import { GITHUB_TOOLS } from '@/lib/github-tools'
@@ -245,9 +246,11 @@ export async function POST(
       data: { role: 'agent', content: text, model: tier, inputTokens, outputTokens, costUsd, agentId: id },
     })
     await db.agent.update({ where: { id }, data: { status: 'idle' } })
+    await clearActivity(id)
 
     return NextResponse.json({ userMessage, agentMessage })
   } catch (err) {
+    await clearActivity(id)
     await db.agent.update({ where: { id }, data: { status: 'error' } })
     const agentMessage = await db.message.create({
       data: { role: 'agent', content: `Error al contactar la IA: ${err instanceof Error ? err.message : 'desconocido'}`, agentId: id },

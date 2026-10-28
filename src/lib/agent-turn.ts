@@ -6,6 +6,7 @@ import { MAIL_CATEGORIES, OUTLOOK_ACCOUNT } from '@/lib/mail-tools'
 import { AGENT_AREAS, AREA_LABELS, CALL_AGENT_ID, MAIL_AGENT_ID, isGestoriaTool, isGestoriaWriteTool, runGestoriaTool } from '@/lib/gestoria-tools'
 import type Anthropic from '@anthropic-ai/sdk'
 import { reviewFromGestoriaWrite } from '@/lib/review'
+import { describeTool, setActivity } from '@/lib/activity'
 import type { Octokit } from '@octokit/rest'
 
 // Pone un expediente en la cola del gestor de caso (case-worker.ts).
@@ -109,6 +110,8 @@ export async function runAgentTurn(opts: {
   // seguir en otra petición. onStep guarda el progreso tras cada tanda.
   deadline?: number
   onStep?: (messages: Anthropic.MessageParam[], usage: TurnUsage) => Promise<void>
+  // Para el bocadillo de la oficina (p. ej. el cliente del expediente).
+  activityLabel?: string
 }): Promise<TurnUsage & { text: string; paused?: boolean; messages: Anthropic.MessageParam[] }> {
   const messages: Anthropic.MessageParam[] = [...opts.history]
   let inputTokens = 0
@@ -119,6 +122,9 @@ export async function runAgentTurn(opts: {
   // cada paso: se marcan para la caché (lectura al 10 % del precio).
   const system: Anthropic.TextBlockParam[] = [{ type: 'text', text: opts.system, cache_control: { type: 'ephemeral' } }]
   const tools = opts.tools?.map((t, i, all) => (i === all.length - 1 ? { ...t, cache_control: { type: 'ephemeral' as const } } : t))
+
+  const show = (text: string) => setActivity(opts.agentId, opts.activityLabel ? `${opts.activityLabel} · ${text}` : text)
+  await show('Pensando…')
 
   for (let i = 0; i < (opts.maxSteps ?? 10); i++) {
     if (i > 0 && opts.deadline && Date.now() > opts.deadline) {
@@ -159,6 +165,7 @@ export async function runAgentTurn(opts: {
     const toolResults: Anthropic.ToolResultBlockParam[] = []
     for (const block of response.content) {
       if (block.type === 'tool_use') {
+        await show(describeTool(block.name, block.input as Record<string, unknown>))
         let result: ToolOutput
         if (block.name === CASE_TOOL.name) {
           // Import diferido: case-worker usa este mismo módulo.

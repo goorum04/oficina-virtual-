@@ -130,3 +130,19 @@ body {
   overflow: hidden;
   overscroll-behavior: none;
 }
+
+/* Bocadillo de actividad de los agentes en la oficina: puntos "escribiendo". */
+.activity-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: #22c55e;
+  display: block;
+  animation: activity-dot 1.2s infinite ease-in-out;
+}
+.activity-dots i:nth-child(2) { animation-delay: 0.15s; }
+.activity-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes activity-dot {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
