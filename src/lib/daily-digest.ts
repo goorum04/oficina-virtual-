@@ -9,6 +9,7 @@ import { officeProtected } from '@/lib/access'
 
 const LEAD_ID = 't-pm'
 const URGENT_DAYS = 3
+const RECENT_OVERDUE_DAYS = 14
 
 function andorraDate(d = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Andorra' }).format(d)
@@ -49,16 +50,23 @@ export async function buildDigest(since: Date): Promise<string> {
   if (gestoriaConfigured() && officeProtected()) {
     const res = await gestoriaFetch('GET', '/api/alerts').catch(() => null)
     const alerts = (res?.ok && Array.isArray(res.data) ? res.data : []) as Array<{ title: string; isRead: boolean; dueDate?: string | null; priority?: string }>
-    const limit = Date.now() + URGENT_DAYS * 86_400_000
-    const urgent = alerts
-      .filter((a) => !a.isRead && (a.priority === 'urgente' || (a.dueDate && new Date(a.dueDate).getTime() < limit)))
-      .sort((a, b) => (a.dueDate ? new Date(a.dueDate).getTime() : 0) - (b.dueDate ? new Date(b.dueDate).getTime() : 0))
+    // Lo que vence en los próximos días o venció hace poco; lo vencido hace
+    // tiempo es un atraso conocido: solo se cuenta.
+    const now = Date.now()
+    const due = (a: { dueDate?: string | null }) => (a.dueDate ? new Date(a.dueDate).getTime() : null)
+    const pending = alerts.filter((a) => !a.isRead)
+    const urgent = pending
+      .filter((a) => { const d = due(a); return d != null ? d < now + URGENT_DAYS * 86_400_000 && d > now - RECENT_OVERDUE_DAYS * 86_400_000 : a.priority === 'urgente' })
+      .sort((a, b) => (due(a) ?? 0) - (due(b) ?? 0))
+    const old = pending.filter((a) => { const d = due(a); return d != null && d <= now - RECENT_OVERDUE_DAYS * 86_400_000 }).length
     const seen = new Set<string>()
     const lines = urgent.filter((a) => !seen.has(a.title) && seen.add(a.title)).slice(0, 10).map((a) => {
-      if (!a.dueDate) return `- ${a.title}`
-      const days = Math.round((new Date(a.dueDate).getTime() - Date.now()) / 86_400_000)
+      const d = due(a)
+      if (d == null) return `- ${a.title}`
+      const days = Math.round((d - now) / 86_400_000)
       return `- ${a.title} — ${days < 0 ? `**vencida hace ${-days} día(s)**` : days === 0 ? '**hoy**' : `en ${days} día(s)`}`
     })
+    if (old) lines.push(`- Además, ${old} alerta(s) vencida(s) hace más de ${RECENT_OVERDUE_DAYS} días sin revisar en GestoriaAD.`)
     out.push('### Urgente')
     out.push(lines.length ? lines.join('\n') : 'Nada urgente en los próximos días.')
   }
@@ -70,6 +78,6 @@ export async function buildDigest(since: Date): Promise<string> {
   out.push(done.length ? done.join('\n') : 'Sin trabajo automático desde el último resumen.')
 
   const usd = Number(spend._sum.costUsd || 0)
-  out.push(`### Gasto\n${(usd * 0.92).toFixed(2).replace('.', ',')} € desde el último resumen${caseCost ? ` (de ellos ${(caseCost * 0.92).toFixed(2).replace('.', ',')} € en expedientes)` : ''}.`)
+  out.push(`### Gasto\n${(usd * 0.92).toFixed(2).replace('.', ',')} € de IA desde el último resumen${caseCost ? ` (de ellos ${(caseCost * 0.92).toFixed(2).replace('.', ',')} € en expedientes)` : ''}.`)
   return out.join('\n\n')
 }
