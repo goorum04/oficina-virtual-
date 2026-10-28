@@ -59,42 +59,68 @@ export async function findOdmDate(c: OdmClient, folders: Array<{ path: string; n
   }
 }
 
+// Palabras de un nombre (sin acentos), para comparar apellidos enteros:
+// "Edouard" no es "Douard".
+const words = (s: string) => norm(s).split(/[^a-z0-9]+/).filter((w) => w.length >= 3)
+
+// Fecha que llevan muchos escaneos en el nombre: "_250604_" = 04/06/2025.
+function fileDate(name: string): Date | null {
+  const m = name.match(/_(\d{2})(\d{2})(\d{2})_/)
+  if (!m) return null
+  const d = new Date(`20${m[1]}-${m[2]}-${m[3]}T12:00:00Z`)
+  return isNaN(d.getTime()) ? null : d
+}
+
 async function lookup(c: OdmClient, folders: Array<{ path: string; name: string; modified: string }>): Promise<{ line: string | null; costUsd: number }> {
-  const surname = norm(c.lastName).split(/\s+/).filter((w) => w.length >= 3)
-  const mine = folders
-    .filter((f) => surname.some((w) => norm(f.name).includes(w)))
-    .sort((a, b) => b.modified.localeCompare(a.modified)) // la más actualizada primero
+  const last = words(c.lastName)
+  const first = words(c.firstName)
   const log = (found: string | null) => logTry(c.id, found)
-  if (!mine.length) { await log(null); return { line: null, costUsd: 0 } }
+  const bySurname = folders.filter((f) => last.length && last.every((w) => words(f.name).includes(w)))
+  // Si hay varias, las que también llevan el nombre; si sigue habiendo
+  // carpetas de personas distintas, no se adivina.
+  const withFirst = bySurname.filter((f) => first.some((w) => words(f.name).includes(w)))
+  const mine = (withFirst.length ? withFirst : bySurname).sort((a, b) => b.modified.localeCompare(a.modified))
+  if (!mine.length) { await log(null); return { line: `${c.firstName} ${c.lastName}: no encuentro su carpeta`, costUsd: 0 } }
+  const distinct = new Set(mine.map((f) => words(f.name).sort().join(' ')))
+  if (!withFirst.length && distinct.size > 1) {
+    await log(null)
+    return { line: `${c.firstName} ${c.lastName}: hay varias carpetas con ese apellido (${mine.map((f) => f.name).join(', ')})`, costUsd: 0 }
+  }
 
   const files: string[] = []
   for (const f of mine) {
-    for (const term of ['odm', 'ordre', 'mission', 'mandat']) {
+    for (const term of ['odm', 'ordre']) {
       const res = await runPcCommand('search', { path: f.path, name: term }, AGENT, 60_000)
       if (!res.ok) continue
       for (const r of ((res.data as { resultados?: Array<{ ruta: string; tipo: string }> }).resultados ?? [])) {
-        if (r.tipo === 'archivo' && /\.pdf$/i.test(r.ruta) && !/avenant/i.test(r.ruta) && !files.includes(r.ruta)) files.push(r.ruta)
+        const base = r.ruta.split('\\').pop() ?? ''
+        if (r.tipo === 'archivo' && /\.pdf$/i.test(base) && /\bodm\b|ordre[\s_-]*de[\s_-]*mission/i.test(base) && !/avenant/i.test(base) && !files.includes(r.ruta)) files.push(r.ruta)
       }
     }
     if (files.length) break
   }
   if (!files.length) { await log(null); return { line: `${c.firstName} ${c.lastName}: no encuentro la ODM en su carpeta`, costUsd: 0 } }
-  // Primero las que dicen estar firmadas.
-  files.sort((a, b) => Number(/sign|firm/i.test(b)) - Number(/sign|firm/i.test(a)))
+  // Primero las que llevan su apellido y las que dicen estar firmadas.
+  const score = (p: string) => {
+    const base = p.split('\\').pop() ?? ''
+    return (last.some((w) => words(base).includes(w)) ? 2 : 0) + (/sign|firm/i.test(base) ? 1 : 0)
+  }
+  files.sort((a, b) => score(b) - score(a))
 
   let costUsd = 0
   for (const file of files.slice(0, 3)) {
+    const name = file.split('\\').pop() ?? file
     const pdf = await readPdf(file)
     if (!pdf) continue
-    const last = await lastPages(pdf, 2)
+    const lastPdf = await lastPages(pdf, 2)
     const response = await anthropic.messages.create({
       model: MODELS.haiku,
       max_tokens: 100,
       messages: [{
         role: 'user',
         content: [
-          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: last } },
-          { type: 'text', text: 'Son las últimas páginas de un ORDRE DE MISSION (ODM) de una gestoría. ¿Qué fecha está escrita tras "Fait à … en deux exemplaires le :" (junto a las firmas)? Si está en blanco, no hay firmas, o el documento es un AVENANT, responde null. Responde SOLO con JSON: {"fecha":"YYYY-MM-DD"} o {"fecha":null}' },
+          { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: lastPdf } },
+          { type: 'text', text: 'Son las últimas páginas de un ORDRE DE MISSION (ODM) de una gestoría. ¿Qué fecha está escrita tras "Fait à … en deux exemplaires le :" (junto a las firmas)? Lee el año con cuidado (cuatro cifras). Si está en blanco, no hay firmas, o el documento es un AVENANT, responde null. Responde SOLO con JSON: {"fecha":"YYYY-MM-DD"} o {"fecha":null}' },
         ],
       }],
     })
@@ -102,14 +128,22 @@ async function lookup(c: OdmClient, folders: Array<{ path: string; name: string;
     const text = response.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('')
     const fecha = text.match(/"fecha"\s*:\s*"(\d{4}-\d{2}-\d{2})"/)?.[1]
     const d = fecha ? new Date(`${fecha}T12:00:00Z`) : null
-    if (!d || isNaN(d.getTime()) || d.getFullYear() < 2015 || d > new Date()) continue
+    if (!fecha || !d || isNaN(d.getTime()) || d.getFullYear() < 2015 || d > new Date()) continue
+    const shown = fecha.split('-').reverse().join('/')
+    // Si el nombre del archivo lleva la fecha del escaneo y no cuadra (más
+    // de un año de diferencia), se deja para que lo mire el humano.
+    const scanned = fileDate(name)
+    if (scanned && Math.abs(scanned.getTime() - d.getTime()) > 365 * 86_400_000) {
+      await log(null)
+      return { line: `${c.firstName} ${c.lastName}: la ODM dice ${shown} pero el archivo es de ${scanned.toISOString().slice(0, 7)}; revísala (${name})`, costUsd }
+    }
     // Se vuelve a mirar justo antes de guardar: solo si sigue vacía.
     const now = await gestoriaFetch('GET', `/api/clients/${c.id}`)
-    if (now.ok && (now.data as { odmDate?: string | null }).odmDate) { await log(fecha!); return { line: null, costUsd } }
+    if (now.ok && (now.data as { odmDate?: string | null }).odmDate) { await log(fecha); return { line: null, costUsd } }
     const put = await gestoriaFetch('PUT', `/api/clients/${c.id}`, { odmDate: fecha })
-    await log(fecha!)
-    const name = file.split('\\').pop()
-    return { line: put.ok ? `${c.firstName} ${c.lastName}: ${fecha!.split('-').reverse().join('/')} (${name})` : `${c.firstName} ${c.lastName}: fecha ${fecha} pero GestoriaAD no la guardó (${put.status})`, costUsd }
+    await log(fecha)
+    const otherName = !last.some((w) => words(name).includes(w)) ? ' — el archivo no lleva su apellido, compruébalo' : ''
+    return { line: put.ok ? `${c.firstName} ${c.lastName}: ${shown} (${name})${otherName}` : `${c.firstName} ${c.lastName}: fecha ${shown} pero GestoriaAD no la guardó (${put.status})`, costUsd }
   }
   await log(null)
   return { line: `${c.firstName} ${c.lastName}: su ODM no tiene la fecha de firma rellenada`, costUsd }
