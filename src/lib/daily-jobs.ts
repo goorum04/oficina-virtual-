@@ -232,7 +232,7 @@ async function odmDates(job: Job): Promise<void> {
     }
     const r = await findOdmDate(c, folders).catch(() => ({ line: null, costUsd: 0 }))
     job.state.costUsd += r.costUsd
-    if (r.line) (/\d{2}\/\d{2}\/\d{4}/.test(r.line) ? job.state.out : job.state.extra).push(r.line)
+    if (r.line) ('saved' in r && r.saved ? job.state.out : job.state.extra).push(r.line)
     job.state.heartbeat = Date.now()
     await save(job)
   }
@@ -242,7 +242,7 @@ async function odmDates(job: Job): Promise<void> {
     await db.message.create({
       data: {
         role: 'agent', model: 'haiku', costUsd, agentId: 't-cli',
-        content: `📅 **Fecha de inicio (firma de la ODM)**${out.length ? `\n\nPuesta en GestoriaAD:\n${out.map((l) => `- ${l}`).join('\n')}` : ''}${extra.length ? `\n\nSin fecha:\n${extra.map((l) => `- ${l}`).join('\n')}` : ''}`,
+        content: `📅 **Fecha de inicio (firma de la ODM)**${out.length ? `\n\nPuesta en GestoriaAD:\n${out.map((l) => `- ${l}`).join('\n')}` : ''}${extra.length ? `\n\nSin fecha (o para revisar):\n${extra.map((l) => `- ${l}`).join('\n')}` : ''}`,
       },
     })
   }

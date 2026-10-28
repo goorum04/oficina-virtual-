@@ -49,7 +49,7 @@ export async function clientsWithoutOdm(): Promise<OdmClient[]> {
 
 // Busca la ODM firmada del cliente, lee la fecha y la guarda. Devuelve una
 // línea para el informe (o null si no hay nada que contar).
-export async function findOdmDate(c: OdmClient, folders: Array<{ path: string; name: string; modified: string }>): Promise<{ line: string | null; costUsd: number }> {
+export async function findOdmDate(c: OdmClient, folders: Array<{ path: string; name: string; modified: string }>): Promise<{ line: string | null; costUsd: number; saved?: boolean }> {
   try {
     return await lookup(c, folders)
   } catch {
@@ -71,7 +71,7 @@ function fileDate(name: string): Date | null {
   return isNaN(d.getTime()) ? null : d
 }
 
-async function lookup(c: OdmClient, folders: Array<{ path: string; name: string; modified: string }>): Promise<{ line: string | null; costUsd: number }> {
+async function lookup(c: OdmClient, folders: Array<{ path: string; name: string; modified: string }>): Promise<{ line: string | null; costUsd: number; saved?: boolean }> {
   const last = words(c.lastName)
   const first = words(c.firstName)
   const log = (found: string | null) => logTry(c.id, found)
@@ -143,7 +143,7 @@ async function lookup(c: OdmClient, folders: Array<{ path: string; name: string;
     const put = await gestoriaFetch('PUT', `/api/clients/${c.id}`, { odmDate: fecha })
     await log(fecha)
     const otherName = !last.some((w) => words(name).includes(w)) ? ' — el archivo no lleva su apellido, compruébalo' : ''
-    return { line: put.ok ? `${c.firstName} ${c.lastName}: ${shown} (${name})${otherName}` : `${c.firstName} ${c.lastName}: fecha ${shown} pero GestoriaAD no la guardó (${put.status})`, costUsd }
+    return { line: put.ok ? `${c.firstName} ${c.lastName}: ${shown} (${name})${otherName}` : `${c.firstName} ${c.lastName}: fecha ${shown} pero GestoriaAD no la guardó (${put.status})`, costUsd, saved: put.ok }
   }
   await log(null)
   return { line: `${c.firstName} ${c.lastName}: su ODM no tiene la fecha de firma rellenada`, costUsd }
