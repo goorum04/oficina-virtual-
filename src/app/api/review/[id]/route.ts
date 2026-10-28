@@ -10,6 +10,7 @@ export const maxDuration = 120
 // Resolver un elemento de "Para revisar":
 // - send: enviar el correo (con el texto editado si se pasa "texto").
 // - done: visto / aprobado (documentos, fichas, pasos).
+// - create: dar de alta el cliente nuevo propuesto en GestoriaAD.
 // - discard: descartar (borra el borrador de Outlook o el documento de GestoriaAD).
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -37,6 +38,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       resultado = res.ok ? 'Documento borrado de GestoriaAD' : `No se pudo borrar el documento (${res.status})`
     }
     data.status = 'discarded'
+  } else if (action === 'create') {
+    if (data.kind !== 'newclient' || !data.nuevo) return NextResponse.json({ error: 'No es un cliente nuevo' }, { status: 400 })
+    const res = await gestoriaFetch('POST', '/api/clients', { ...data.nuevo, status: 'contacto_inicial' })
+    if (!res.ok) return NextResponse.json({ error: `GestoriaAD no lo creó (${res.status}): ${toToolText(res.data)}` }, { status: 502 })
+    resultado = 'Ficha creada en GestoriaAD'
+    data.status = 'done'
   } else if (action === 'done') {
     data.status = 'done'
   } else {

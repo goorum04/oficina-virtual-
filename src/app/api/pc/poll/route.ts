@@ -6,6 +6,8 @@ import { maybeRunFocus } from '@/lib/focus'
 import { maybeRunNextCase } from '@/lib/case-worker'
 import { isOffHours } from '@/lib/work-hours'
 import { maybeDailyDigest } from '@/lib/daily-digest'
+import { maybeDailyJobs } from '@/lib/daily-jobs'
+import { checkBudget } from '@/lib/budget'
 
 // La revisión automática del correo corre tras responder (after) y puede
 // durar unos minutos.
@@ -34,10 +36,20 @@ export async function POST(req: Request) {
   if (isOffHours()) {
     after(() => db.agent.updateMany({ where: { status: { not: 'idle' } }, data: { status: 'idle' } }).catch(() => {}))
   } else {
-    after(() => maybeReviewMail().catch((e) => console.error('[mail-review]', e)))
-    after(() => maybeRunFocus().catch((e) => console.error('[focus]', e)))
-    after(() => maybeRunNextCase().catch((e) => console.error('[case]', e)))
-    after(() => maybeDailyDigest().catch((e) => console.error('[digest]', e)))
+    after(async () => {
+      // El resumen, la agenda y los recordatorios de documentación no usan
+      // IA: siguen aunque se alcance el tope de gasto del mes.
+      await maybeDailyDigest().catch((e) => console.error('[digest]', e))
+      const allowed = await checkBudget().catch(() => true)
+      await Promise.all([
+        maybeDailyJobs(allowed).catch((e) => console.error('[daily]', e)),
+        ...(allowed ? [
+          maybeReviewMail().catch((e) => console.error('[mail-review]', e)),
+          maybeRunFocus().catch((e) => console.error('[focus]', e)),
+          maybeRunNextCase().catch((e) => console.error('[case]', e)),
+        ] : []),
+      ])
+    })
   }
 
   const deadline = Date.now() + WAIT_MS

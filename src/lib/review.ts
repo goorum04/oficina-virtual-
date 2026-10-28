@@ -1,12 +1,13 @@
 import { db } from '@/lib/db'
 import { gestoriaFetch } from '@/lib/gestoria'
+import { notifyReviewPending } from '@/lib/push'
 
 // "Para revisar": todo lo que los agentes preparan para el humano (borradores
 // de correo, documentos redactados, fichas y pasos que han tocado) en una
 // sola lista, para aprobar con un clic. Cada elemento es un ActivityLog de
 // tipo "review" con los datos en metadata.
 
-export type ReviewKind = 'mail' | 'document' | 'client' | 'step'
+export type ReviewKind = 'mail' | 'document' | 'client' | 'step' | 'newclient'
 export type ReviewStatus = 'pending' | 'sent' | 'done' | 'discarded'
 
 export type ReviewData = {
@@ -24,6 +25,8 @@ export type ReviewData = {
   // Documento de GestoriaAD
   docId?: string
   resultado?: string
+  // Cliente nuevo propuesto (se crea en GestoriaAD al aprobarlo)
+  nuevo?: { firstName: string; lastName: string; email: string; notes?: string }
 }
 
 export async function addReview(title: string, data: ReviewData, agentId: string): Promise<void> {
@@ -32,6 +35,7 @@ export async function addReview(title: string, data: ReviewData, agentId: string
   await db.activityLog.create({
     data: { type: 'review', message: title.slice(0, 200), metadata: JSON.stringify({ status: 'pending', ...data }), agentId, projectId: agent.projectId },
   })
+  await notifyReviewPending().catch(() => {})
 }
 
 const names = new Map<string, string>()

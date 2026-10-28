@@ -27,8 +27,13 @@ function isCrossSiteMutation(request: NextRequest): boolean {
   }
 }
 
+// Archivos estáticos sin datos que el móvil pide sin credenciales (el
+// service worker de los avisos y el manifiesto para instalar la app).
+const PUBLIC_FILES = ['/sw.js', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png']
+
 export function proxy(request: NextRequest) {
   if (isBridgePath(request.nextUrl.pathname)) return NextResponse.next()
+  if (request.method === 'GET' && PUBLIC_FILES.includes(request.nextUrl.pathname)) return NextResponse.next()
 
   if (isCrossSiteMutation(request)) {
     return new NextResponse('Petición de otro sitio bloqueada', { status: 403 })

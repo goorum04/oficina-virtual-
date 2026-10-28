@@ -401,6 +401,48 @@ if ($env:BR_REPLY_ID) {
   ConvertTo-Json -Compress -InputObject ('Enviado: ' + $subject)
 }
 `,
+  // Agenda: fechas de GestoriaAD como citas de día completo en el calendario
+  // de la cuenta, con aviso a las 9:00 del día anterior. Cada cita lleva su
+  // clave en BillingInformation ("oficina:<clave>"): se actualiza si ya
+  // existe y se borra si en GestoriaAD ya no está (tarea hecha, alerta vista).
+  cal_sync: `
+$events = ConvertFrom-Json $env:BR_EVENTS
+$cal = (AllInboxes)[0].folder.Store.GetDefaultFolder(9)
+$mine = @{}
+# Solo las citas de la categoría "Gestoría" (las que pone la oficina).
+foreach ($it in @($cal.Items.Restrict("[Categories] = 'Gestoría'"))) {
+  try { $b = [string]$it.BillingInformation } catch { $b = '' }
+  if ($b.StartsWith('oficina:')) { $mine[$b] = $it }
+}
+$created = 0; $updated = 0; $removed = 0
+$keep = @{}
+foreach ($e in @($events)) {
+  $key = 'oficina:' + $e.key
+  $keep[$key] = $true
+  $start = [datetime]::ParseExact([string]$e.fecha, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+  if ($mine.ContainsKey($key)) {
+    $it = $mine[$key]
+    if ($it.Subject -ne $e.asunto -or $it.Start.Date -ne $start.Date) {
+      $it.Subject = $e.asunto; $it.Start = $start; $it.AllDayEvent = $true; $it.Save(); $updated++
+    }
+  } else {
+    $it = $cal.Items.Add(1)
+    $it.Subject = $e.asunto
+    $it.Start = $start
+    $it.AllDayEvent = $true
+    $it.Body = [string]$e.nota
+    $it.BusyStatus = 0
+    $it.ReminderSet = $true
+    $it.ReminderMinutesBeforeStart = 900
+    $it.Categories = 'Gestoría'
+    $it.BillingInformation = $key
+    $it.Save()
+    $created++
+  }
+}
+foreach ($k in @($mine.Keys)) { if (-not $keep.ContainsKey($k)) { $mine[$k].Delete(); $removed++ } }
+ConvertTo-Json -Compress -InputObject ([string]$created + ' nuevas, ' + $updated + ' cambiadas, ' + $removed + ' quitadas (' + @($events).Count + ' fechas en los próximos 60 días)')
+`,
   mail_discard_draft: `
 $d = GetMail $env:BR_ID
 $subject = $d.Subject
@@ -535,6 +577,11 @@ Object.assign(handlers, {
     if ((!id && !responderA) || !String(texto || '').trim()) throw new Error('Falta el borrador o el texto')
     return runOutlook('mail_send_draft', { BR_ID: String(id || ''), BR_REPLY_ID: String(responderA || ''), BR_BODY: String(texto), BR_ACCOUNT: cuenta ? String(cuenta) : '' })
   },
+  cal_sync({ eventos, cuenta }) {
+    const list = (Array.isArray(eventos) ? eventos : []).filter((e) => e && e.key && /^\d{4}-\d{2}-\d{2}$/.test(String(e.fecha)))
+      .map((e) => ({ key: String(e.key).slice(0, 80), asunto: String(e.asunto || '').slice(0, 200), fecha: String(e.fecha), nota: String(e.nota || '').slice(0, 300) }))
+    return runOutlook('cal_sync', { BR_EVENTS: JSON.stringify(list), BR_ACCOUNT: cuenta ? String(cuenta) : '' })
+  },
   mail_discard_draft({ id, cuenta }) {
     if (!id) throw new Error('Falta el borrador')
     return runOutlook('mail_discard_draft', { BR_ID: String(id), BR_ACCOUNT: cuenta ? String(cuenta) : '' })
@@ -584,6 +631,7 @@ function describe(cmd) {
     case 'mail_move': return `CORREO: mover a ${p.carpeta}`
     case 'mail_send_draft': return 'CORREO: ENVIAR un borrador aprobado en la oficina'
     case 'mail_discard_draft': return 'CORREO: descartar un borrador'
+    case 'cal_sync': return `AGENDA: sincronizar ${(p.eventos || []).length} fecha(s) de GestoriaAD con el calendario`
     default: return `${cmd.kind.toUpperCase()}: ${p.path}`
   }
 }

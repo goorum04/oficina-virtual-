@@ -19,6 +19,7 @@ const Scene3D = dynamic(() => import('@/components/office/Scene3D'), { ssr: fals
 import type { Agent3D } from '@/components/office/Scene3D'
 import Markdown from '@/components/office/Markdown'
 import ReviewPanel, { useReviewCount } from '@/components/office/ReviewPanel'
+import MicButton from '@/components/office/MicButton'
 import { isOffHours, WORK_START_HOUR } from '@/lib/work-hours'
 
 /* ═══════════════════════ TYPES ═══════════════════════ */
@@ -263,8 +264,9 @@ export default function VirtualOffice() {
   // Un panel a la vez.
   useEffect(() => { if (selectedAgent) setReviewOpen(false) }, [selectedAgent])
 
-  const sendChatMessage = useCallback(async () => {
-    const text = chatInput.trim()
+  const sendChatMessage = useCallback(async (spoken?: unknown) => {
+    // Desde el micrófono llega el texto dictado; desde el botón, el evento.
+    const text = (typeof spoken === 'string' ? spoken : chatInput).trim()
     if ((!text && pendingFiles.length === 0) || !selectedAgent || chatSending) return
     const attachments = pendingFiles
     setChatInput('')
@@ -910,6 +912,7 @@ export default function VirtualOffice() {
                   >
                     <Paperclip className="h-4 w-4" />
                   </button>
+                  <MicButton disabled={chatSending} onText={setChatInput} onFinal={(t) => sendChatMessage(t)} />
                   <textarea
                     value={chatInput}
                     onChange={e => {
@@ -934,7 +937,7 @@ export default function VirtualOffice() {
                     {chatSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
                 </div>
-                <p className="mt-1.5 px-1 text-[11px] text-slate-400">Enter para enviar · Mayús+Enter para salto de línea</p>
+                <p className="mt-1.5 px-1 text-[11px] text-slate-400">Enter para enviar · Mayús+Enter para salto de línea · 🎤 para dictar</p>
               </div>
             </div>
           </motion.div>
