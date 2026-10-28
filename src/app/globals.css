@@ -120,3 +120,13 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* La oficina es una pantalla fija: la página nunca se desplaza (solo los
+   paneles por dentro), así ningún panel puede empujar la escena fuera de la
+   vista ni esconder sus botones. */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}

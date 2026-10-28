@@ -1,0 +1,7 @@
+{
+  "officeUrl": "https://tu-oficina.vercel.app",
+  "token": "CAMBIA_ESTO",
+  "allowCommands": true,
+  "roots": [],
+  "allowSendMail": false
+}

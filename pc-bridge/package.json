@@ -1,0 +1,21 @@
+{
+  "name": "oficina-pc-bridge",
+  "version": "1.0.0",
+  "description": "Puente que deja a los agentes de la Oficina Virtual usar este PC (archivos y comandos)",
+  "private": true,
+  "main": "bridge.js",
+  "bin": "bridge.js",
+  "scripts": {
+    "start": "node bridge.js",
+    "build:win": "pkg . --targets node18-win-x64 --output dist/oficina-pc-bridge-win.exe"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^5.16.1"
+  },
+  "pkg": {
+    "assets": [],
+    "targets": [
+      "node18-win-x64"
+    ]
+  }
+}

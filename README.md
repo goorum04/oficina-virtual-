@@ -11,6 +11,57 @@ reportes o auditorías, aunque también se puede chatear directamente con
 cualquier otro agente. Las respuestas del chat las genera Claude a través de
 la API de Anthropic.
 
+## Equipo de la gestoría
+
+Los agentes gestionan **GestoriaAD** (repo `goorum04/hubspot`) a través de su
+API, cada uno en un área concreta:
+
+| Agente | Área |
+|--------|------|
+| Nova (portavoz) | Coordinación: reportes de toda la gestoría, agenda, tareas del equipo, historial. Trabaja en el despacho de dirección |
+| Clara | Clientes y KYC: altas, datos, documentación que falta, enlaces de subida |
+| Pau | Procesos: residencias, sociedades, IE y sus pasos |
+| Vera | Alertas, vencimientos y apostillas |
+| Dora | Documentación: registro, análisis KYC con IA, checklists IE |
+| Hugo | HubSpot: importaciones y sincronización |
+| Olga | Correo de Outlook (en el PC): cada 20 minutos lo revisa, lo clasifica con categorías "Gestoría: …" y crea alertas o tareas para lo importante |
+| Rayo | Llamadas: resumen de un cliente en segundos mientras hablas por teléfono |
+
+Las herramientas están en `src/lib/gestoria-tools.ts`. Borrar datos u
+operaciones masivas exigen que el humano lo confirme en el chat. Para
+conectarlo:
+
+1. En GestoriaAD, añade un usuario para la oficina a `APP_USERS`
+   (p.ej. `oficina:<clave>`); así su historial de cambios registra lo que
+   hacen los agentes.
+2. En la oficina, define `GESTORIA_URL`, `GESTORIA_USER` y `GESTORIA_PASSWORD`.
+3. `bun run db:push` y `bun run db:seed` para crear las tablas nuevas y el
+   equipo (el seed borra el equipo anterior y sus chats).
+
+## Revisión automática del correo
+
+Mientras el puente del PC está abierto, cada vez que pregunta por órdenes
+la oficina comprueba si toca revisar el correo (cada 20 minutos, ver
+`src/lib/mail-review.ts`). Olga lee lo nuevo del Outlook de escritorio, lo
+clasifica, crea alertas/tareas en GestoriaAD y deja el resumen en su chat y
+en la actividad. En esas revisiones solo tiene herramientas de correo y de
+crear alertas/tareas; nunca envía ni borra correos. Necesita el Outlook de
+escritorio clásico (el "nuevo Outlook" no se puede automatizar).
+
+## Acceso al PC
+
+Con el programa `pc-bridge/` abierto en el PC de la gestoría, todos los
+agentes pueden ver, buscar, leer (también PDF e imágenes), crear, mover y
+borrar archivos, subirlos a la ficha de un cliente y ejecutar comandos.
+Borrar y ejecutar piden confirmación en el chat. Instalación en
+[`pc-bridge/README.md`](pc-bridge/README.md).
+
+## Acceso a la oficina
+
+Con `APP_USERS` definido, la oficina entera pide usuario y contraseña
+(igual que GestoriaAD). Sin él sigue abierta, pero los agentes no reciben
+las herramientas de GestoriaAD ni del PC.
+
 ![Vista de la oficina virtual](docs/preview.png)
 
 ## Stack
@@ -31,7 +82,8 @@ src/components/ui/          Componentes shadcn/ui
 src/lib/                    Cliente de Prisma y helper de notificaciones WebSocket
 prisma/schema.prisma        Modelos: Project, Agent, Task, ActivityLog, Message
 mini-services/office-ws/    Servicio Socket.IO independiente (puerto 3004)
-scripts/seed.ts             Crea el equipo de 7 agentes con sus roles y portavoz
+pc-bridge/                  Programa para el PC de la gestoría (acceso de los agentes)
+scripts/seed.ts             Crea el equipo de 7 agentes de la gestoría con su área y portavoz
 ```
 
 ## Desarrollo local

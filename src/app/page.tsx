@@ -6,7 +6,8 @@ import { io, Socket } from 'socket.io-client'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Briefcase, FolderOpen, Users, Loader2, Play, X,
-  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, ChevronDown, MessageSquare, Send, Crown, Github, Paperclip, FileText, Image as ImageIcon, Euro
+  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, ChevronDown, MessageSquare, Send, Crown, Github, Paperclip, FileText, Image as ImageIcon, Euro,
+  Inbox,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -16,6 +17,10 @@ import { Separator } from '@/components/ui/separator'
 
 const Scene3D = dynamic(() => import('@/components/office/Scene3D'), { ssr: false })
 import type { Agent3D } from '@/components/office/Scene3D'
+import Markdown from '@/components/office/Markdown'
+import ReviewPanel, { useReviewCount } from '@/components/office/ReviewPanel'
+import MicButton from '@/components/office/MicButton'
+import { isOffHours, WORK_START_HOUR } from '@/lib/work-hours'
 
 /* ═══════════════════════ TYPES ═══════════════════════ */
 interface Task { id: string; title: string; description?: string; status: string; priority: string; progress: number; agentId?: string | null; agent?: { id: string; name: string; avatar: string } | null }
@@ -81,6 +86,8 @@ export default function VirtualOffice() {
   const [currentProject, setCurrentProject] = useState<ProjectDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedAgent, setSelectedAgent] = useState<Agent & { tasks: Task[] } | null>(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewCount, refreshReviewCount] = useReviewCount()
   const [simulating, setSimulating] = useState(false)
   const [logs, setLogs] = useState<ActivityLog[]>([])
   const socketRef = useRef<Socket | null>(null)
@@ -203,6 +210,7 @@ export default function VirtualOffice() {
   const [chatSending, setChatSending] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([])
   const [fileError, setFileError] = useState('')
+  const [tasksOpen, setTasksOpen] = useState(false)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -237,18 +245,40 @@ export default function VirtualOffice() {
       .finally(() => setChatLoading(false))
   }, [selectedAgent?.id])
 
+  // Solo se desplaza la lista de mensajes. (scrollIntoView desplazaba
+  // también la página entera: la oficina se iba hacia arriba y el botón de
+  // cerrar quedaba fuera de la pantalla.)
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chatMessages])
+    const el = chatEndRef.current
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [chatMessages, chatSending])
 
-  const sendChatMessage = useCallback(async () => {
-    const text = chatInput.trim()
+  // Esc cierra el panel abierto (agente o "Para revisar").
+  useEffect(() => {
+    if (!selectedAgent && !reviewOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setSelectedAgent(null); setReviewOpen(false) } }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selectedAgent, reviewOpen])
+
+  // Un panel a la vez.
+  useEffect(() => { if (selectedAgent) setReviewOpen(false) }, [selectedAgent])
+
+  const sendChatMessage = useCallback(async (spoken?: unknown) => {
+    // Desde el micrófono llega el texto dictado; desde el botón, el evento.
+    const text = (typeof spoken === 'string' ? spoken : chatInput).trim()
     if ((!text && pendingFiles.length === 0) || !selectedAgent || chatSending) return
     const attachments = pendingFiles
     setChatInput('')
     setPendingFiles([])
     setFileError('')
     setChatSending(true)
+    // El mensaje propio aparece al instante; se sustituye por el guardado.
+    const tempId = `tmp-${Date.now()}`
+    setChatMessages(prev => [...prev, {
+      id: tempId, role: 'user', content: text, createdAt: new Date().toISOString(),
+      attachments: attachments.map((a, i) => ({ id: `${tempId}-${i}`, filename: a.filename, mimeType: a.mimeType })),
+    }])
     try {
       const res = await fetch(`/api/agents/${selectedAgent.id}/chat`, {
         method: 'POST',
@@ -257,7 +287,7 @@ export default function VirtualOffice() {
       })
       const data = await res.json()
       if (data.userMessage && data.agentMessage) {
-        setChatMessages(prev => [...prev, data.userMessage, data.agentMessage])
+        setChatMessages(prev => [...prev.filter(m => m.id !== tempId), data.userMessage, data.agentMessage])
         if (data.agentMessage.costUsd) loadCosts()
       }
     } catch { }
@@ -372,19 +402,20 @@ export default function VirtualOffice() {
 
   /* ---- 3D agents (ALL agents from all projects) ---- */
   const agents3D: Agent3D[] = allAgents.map(a => ({
-    id: a.id, name: a.name, role: a.role, avatar: a.avatar, brain: a.brain,
+    id: a.id, name: a.name, role: a.role, avatar: a.avatar, brain: a.brain, isSpokesperson: a.isSpokesperson,
     status: a.status, tasks: (a.tasks || []).map(t => ({ id: t.id, title: t.title, status: t.status, progress: t.progress, priority: t.priority })),
   }))
 
   /* ---- Stats ---- */
   const workingCount = currentProject?.agents.filter(a => a.status === 'working').length || 0
-  const restingCount = allAgents.filter(a => a.status === 'idle').length || 0
+  const sleeping = isOffHours()
+  const restingCount = allAgents.filter(a => a.status === 'idle' && !(a.tasks || []).some(t => t.status === 'in_progress')).length || 0
   const totalTasks = currentProject?.tasks.length || 0
   const completedTasks = currentProject?.tasks.filter(t => t.status === 'completed').length || 0
   const avgProgress = totalTasks > 0 ? Math.round(currentProject!.tasks.reduce((s, t) => s + t.progress, 0) / totalTasks) : 0
 
   return (
-    <div className="relative w-full h-screen overflow-hidden bg-[#0d0d1a]">
+    <div className="fixed inset-0 overflow-hidden bg-[#0d0d1a]">
       {/* ══════ 3D SCENE ══════ */}
       <div className="absolute inset-0 z-0">
         {loading && !currentProject ? (
@@ -429,7 +460,7 @@ export default function VirtualOffice() {
                   }}
                   className={`pointer-events-auto flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-medium transition-all duration-200 border ${
                     currentProject?.id === p.id
-                      ? 'bg-white/15 border-white/20 text-white shadow-lg'
+                      ? 'bg-black/70 border-white/20 text-white shadow-lg'
                       : 'bg-black/40 border-white/[0.06] text-white/50 hover:bg-black/60 hover:text-white/70'
                   } backdrop-blur-xl`}
                 >
@@ -451,9 +482,11 @@ export default function VirtualOffice() {
                         <div className="px-3.5 py-2.5 border-b border-white/[0.06] text-white/40 text-[10px] font-semibold uppercase tracking-wider">
                           Agentes del equipo
                         </div>
-                        <ScrollArea className="max-h-72">
+                        {/* Scroll nativo: el ScrollArea de Radix no respeta max-h y
+                            cortaba los últimos agentes sin dejar desplazarse. */}
+                        <div className="max-h-[70vh] overflow-y-auto">
                           <div className="p-1.5">
-                            {allAgents.map(a => (
+                            {[...allAgents].sort((x, y) => Number(!!y.isSpokesperson) - Number(!!x.isSpokesperson)).map(a => (
                               <button
                                 key={a.id}
                                 onClick={() => { setSelectedAgent(a); setTeamMenuOpenFor(null) }}
@@ -474,7 +507,7 @@ export default function VirtualOffice() {
                               </button>
                             ))}
                           </div>
-                        </ScrollArea>
+                        </div>
                       </motion.div>
                     </>
                   )}
@@ -496,7 +529,15 @@ export default function VirtualOffice() {
                 <Activity className="w-3.5 h-3.5 text-emerald-400" />
                 <span className="text-emerald-400 font-semibold">{workingCount}</span>
               </div>
-              {restingCount > 0 && (
+              {sleeping ? (
+                <>
+                  <div className="w-px h-4 bg-white/10" />
+                  <div className="flex items-center gap-1.5 text-xs" title="De 20:00 a 8:00 no trabajan por su cuenta">
+                    <span className="text-sm">😴</span>
+                    <span className="text-indigo-300/90 font-medium">Durmiendo hasta las {WORK_START_HOUR}:00</span>
+                  </div>
+                </>
+              ) : restingCount > 0 && (
                 <>
                   <div className="w-px h-4 bg-white/10" />
                   <div className="flex items-center gap-1.5 text-xs">
@@ -535,6 +576,18 @@ export default function VirtualOffice() {
                 </Button>
               </a>
             )}
+
+            <Button
+              onClick={() => { setSelectedAgent(null); setReviewOpen(true) }}
+              size="sm"
+              className="rounded-xl bg-white hover:bg-slate-100 text-slate-900 shadow-lg border-0"
+            >
+              <Inbox className="w-3.5 h-3.5 mr-1.5" />
+              Para revisar
+              {reviewCount > 0 && (
+                <span className="ml-1.5 rounded-full bg-red-500 px-1.5 text-[11px] font-semibold leading-[18px] text-white">{reviewCount}</span>
+              )}
+            </Button>
 
             {allAgents.some(a => a.isSpokesperson) && (
               <Button
@@ -659,190 +712,190 @@ export default function VirtualOffice() {
         </div>
       </div>
 
-      {/* ══════ AGENT DETAIL PANEL ══════ */}
+      {/* ══════ AGENT PANEL + CHAT ══════ */}
+      {/* Panel sólido y a toda altura: legible sobre la escena (sin
+          transparencias), con el chat como protagonista. */}
+      <AnimatePresence>
+        {reviewOpen && <ReviewPanel key="review" onClose={() => setReviewOpen(false)} onChange={refreshReviewCount} />}
+      </AnimatePresence>
       <AnimatePresence>
         {selectedAgent && (
           <motion.div
-            initial={{ opacity: 0, x: 20, scale: 0.95 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, x: 20, scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-            className="absolute top-20 right-4 z-40 w-96"
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 24 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+            className="absolute top-3 right-3 bottom-3 z-40 w-[calc(100vw-1.5rem)] sm:w-[460px]"
           >
-            <div className="bg-black/70 backdrop-blur-2xl border border-white/[0.1] rounded-2xl shadow-2xl overflow-hidden">
+            <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white text-slate-800 shadow-[0_20px_60px_-15px_rgba(15,23,42,0.35)]">
               {/* Header */}
-              <div className="relative px-5 py-4 border-b border-white/[0.06]">
+              <div className="flex items-center gap-3 border-b border-slate-100 px-5 py-4">
+                <div className="relative flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-slate-100 text-2xl">
+                  {selectedAgent.avatar}
+                  <span
+                    className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white"
+                    style={{ background: ST[selectedAgent.status]?.c || '#71717a' }}
+                  />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <h3 className="truncate text-[15px] font-semibold text-slate-900">{selectedAgent.name}</h3>
+                    {selectedAgent.isSpokesperson && <Crown className="h-3.5 w-3.5 flex-shrink-0 text-amber-500" />}
+                  </div>
+                  <p className="truncate text-[13px] text-slate-500">
+                    {selectedAgent.role} · <span style={{ color: ST[selectedAgent.status]?.c }}>{ST[selectedAgent.status]?.l}</span>
+                  </p>
+                </div>
+                {!!costByAgent[selectedAgent.id] && (
+                  <span className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-600" title="Gasto de IA de este agente">
+                    <Euro className="h-3 w-3" />
+                    {formatCost(costByAgent[selectedAgent.id]).replace(' €', '')}
+                  </span>
+                )}
                 <button
                   onClick={() => setSelectedAgent(null)}
-                  className="absolute top-3 right-3 w-6 h-6 rounded-full bg-white/[0.06] flex items-center justify-center hover:bg-white/[0.12] transition-colors"
+                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+                  aria-label="Cerrar"
                 >
-                  <X className="w-3.5 h-3.5 text-white/50" />
+                  <X className="h-4 w-4" />
                 </button>
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-11 h-11 rounded-xl flex items-center justify-center text-lg font-bold text-white shadow-lg"
-                    style={{
-                      background: `linear-gradient(135deg, ${ST[selectedAgent.status]?.c || '#71717a'}, ${ST[selectedAgent.status]?.c || '#71717a'}88)`,
-                      boxShadow: `0 4px 20px ${ST[selectedAgent.status]?.c || '#71717a'}40`
-                    }}
-                  >
-                    {selectedAgent.name.charAt(0)}
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <h3 className="text-white font-semibold text-sm">{selectedAgent.name}</h3>
-                      {selectedAgent.isSpokesperson && <Crown className="w-3.5 h-3.5 text-amber-400" />}
-                    </div>
-                    <p className="text-white/40 text-xs capitalize">{selectedAgent.role}</p>
-                  </div>
-                </div>
-                {selectedAgent.function && (
-                  <p className="text-white/50 text-xs mt-2 leading-relaxed">{selectedAgent.function}</p>
-                )}
-                {/* Brain type badge */}
-                {selectedAgent.brain && (
-                  <div className="flex items-center gap-2 mt-2">
-                    <Brain className="w-3 h-3 text-violet-400" />
-                    <span className="text-xs font-medium text-violet-300 bg-violet-500/10 border border-violet-500/20 rounded-lg px-2 py-0.5">
-                      {selectedAgent.brain.replace('-', ' ').replace(/\b\w/g, c => c.toUpperCase())}
-                    </span>
-                  </div>
-                )}
-                <div className="flex items-center gap-1.5 mt-2.5">
-                  {ST[selectedAgent.status]?.i}
-                  <span className="text-xs font-medium" style={{ color: ST[selectedAgent.status]?.c }}>
-                    {ST[selectedAgent.status]?.l}
-                  </span>
-                </div>
               </div>
 
-              {/* Tasks */}
-              <div className="p-4">
-                <h4 className="text-white/50 text-[10px] font-semibold uppercase tracking-wider mb-3">Tareas asignadas</h4>
-                {(!selectedAgent.tasks || selectedAgent.tasks.length === 0) ? (
-                  <p className="text-white/20 text-xs">Sin tareas</p>
-                ) : (
-                  <div className="space-y-2.5">
-                    {selectedAgent.tasks.map(task => (
-                      <div key={task.id} className="bg-white/[0.03] rounded-xl p-3 border border-white/[0.05]">
-                        <div className="flex items-start justify-between mb-1.5">
-                          <span className="text-xs text-white/80 font-medium leading-tight">{task.title}</span>
-                          <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 border flex-shrink-0 ml-2 ${PR[task.priority]?.c || PR.low.c}`}>
-                            {PR[task.priority]?.l || task.priority}
-                          </Badge>
+              {/* Función + tareas (plegables) */}
+              <div className="border-b border-slate-100">
+                <button
+                  onClick={() => setTasksOpen(o => !o)}
+                  className="flex w-full items-center gap-2 px-5 py-2.5 text-left text-[13px] text-slate-600 transition-colors hover:bg-slate-50"
+                >
+                  <ChevronRight className={`h-3.5 w-3.5 text-slate-400 transition-transform ${tasksOpen ? 'rotate-90' : ''}`} />
+                  <span className="font-medium text-slate-700">Tareas</span>
+                  <span className="rounded-full bg-slate-100 px-1.5 text-[11px] text-slate-500">{selectedAgent.tasks?.length || 0}</span>
+                  {selectedAgent.function && <span className="ml-2 truncate text-slate-400">{selectedAgent.function}</span>}
+                </button>
+                {tasksOpen && (
+                  <div className="max-h-56 space-y-2 overflow-y-auto px-5 pb-3">
+                    {selectedAgent.function && <p className="text-[13px] leading-relaxed text-slate-500">{selectedAgent.function}</p>}
+                    {(!selectedAgent.tasks || selectedAgent.tasks.length === 0) ? (
+                      <p className="text-[13px] text-slate-400">Sin tareas</p>
+                    ) : selectedAgent.tasks.map(task => (
+                      <div key={task.id} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-[13px] font-medium leading-snug text-slate-800">{task.title}</span>
+                          <span className={`flex-shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium ${
+                            task.priority === 'critical' ? 'bg-red-50 text-red-600' : task.priority === 'high' ? 'bg-orange-50 text-orange-600' : task.priority === 'medium' ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-500'
+                          }`}>{PR[task.priority]?.l || task.priority}</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 h-1.5 bg-white/[0.06] rounded-full overflow-hidden">
-                            <motion.div
-                              className="h-full rounded-full"
-                              style={{ background: task.status === 'completed' ? '#22c55e' : task.status === 'in_progress' ? '#6366f1' : '#71717a' }}
-                              animate={{ width: `${task.progress}%` }}
-                              transition={{ duration: 0.5 }}
-                            />
+                        {task.description && <p className="mt-1 whitespace-pre-line text-[12px] leading-snug text-slate-500">{task.description}</p>}
+                        <div className="mt-1.5 flex items-center gap-2">
+                          <div className="h-1 flex-1 overflow-hidden rounded-full bg-slate-200">
+                            <div className="h-full rounded-full bg-slate-700" style={{ width: `${task.progress}%` }} />
                           </div>
-                          <span className="text-[10px] text-white/40 w-7 text-right">{task.progress}%</span>
+                          <span className="w-8 text-right text-[11px] text-slate-400">{task.progress}%</span>
                         </div>
                       </div>
                     ))}
+                    {githubConnected && (
+                      <div className="pt-1">
+                        <label className="mb-1 flex items-center gap-1.5 text-[12px] font-medium text-slate-500"><Github className="h-3 w-3" /> Repositorio</label>
+                        <select
+                          value={selectedAgent.githubRepo || ''}
+                          onChange={e => assignRepo(selectedAgent.id, e.target.value)}
+                          className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[13px] text-slate-700 outline-none focus:border-slate-400"
+                        >
+                          <option value="">Sin repositorio asignado</option>
+                          {githubRepos.map(r => <option key={r} value={r}>{r}</option>)}
+                        </select>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* GitHub repo assignment */}
-              {githubConnected && (
-                <div className="border-t border-white/[0.06] p-4">
-                  <h4 className="text-white/50 text-[10px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                    <Github className="w-3 h-3" /> Repositorio
-                  </h4>
-                  <select
-                    value={selectedAgent.githubRepo || ''}
-                    onChange={e => assignRepo(selectedAgent.id, e.target.value)}
-                    className="w-full bg-white/[0.05] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-white outline-none focus:border-violet-500/50"
-                  >
-                    <option value="" className="bg-zinc-900">Sin repositorio asignado</option>
-                    {githubRepos.map(r => (
-                      <option key={r} value={r} className="bg-zinc-900">{r}</option>
-                    ))}
-                  </select>
-                  {selectedAgent.githubRepo && (
-                    <p className="text-white/30 text-[10px] mt-1.5">
-                      Puede leer/escribir archivos y abrir PRs en este repo. Solo mergea si tú lo confirmas en el chat.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Chat */}
-              <div className="border-t border-white/[0.06] p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <h4 className="text-white/50 text-[10px] font-semibold uppercase tracking-wider">
-                    Chat {selectedAgent.isSpokesperson && '· reportes y auditorías'}
-                  </h4>
-                  {!!costByAgent[selectedAgent.id] && (
-                    <span className="flex items-center gap-1 text-[10px] text-lime-400/80 font-medium">
-                      <Euro className="w-2.5 h-2.5" />
-                      {formatCost(costByAgent[selectedAgent.id])}
-                    </span>
-                  )}
-                </div>
-                <ScrollArea className="h-52 pr-2">
-                  <div className="space-y-2">
-                    {chatLoading ? (
-                      <div className="flex justify-center py-4"><Loader2 className="w-4 h-4 animate-spin text-white/30" /></div>
-                    ) : chatMessages.length === 0 ? (
-                      <p className="text-white/20 text-xs">Escribe para empezar a hablar con {selectedAgent.name}.</p>
-                    ) : (
-                      chatMessages.map(m => (
-                        <div key={m.id} className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
-                          {m.attachments && m.attachments.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mb-1 max-w-[85%] justify-end">
-                              {m.attachments.map(a => (
-                                <span key={a.id} className="flex items-center gap-1 bg-white/[0.08] border border-white/[0.08] rounded-md px-1.5 py-0.5 text-[9px] text-white/50">
-                                  {a.mimeType.startsWith('image/') ? <ImageIcon className="w-2.5 h-2.5" /> : <FileText className="w-2.5 h-2.5" />}
-                                  {a.filename}
-                                </span>
-                              ))}
-                            </div>
-                          )}
-                          {m.content && (
-                            <div className={`max-w-[85%] rounded-xl px-3 py-1.5 text-xs leading-relaxed ${
-                              m.role === 'user'
-                                ? 'bg-violet-600/80 text-white'
-                                : 'bg-white/[0.06] text-white/80'
-                            }`}>
-                              {m.content}
-                            </div>
-                          )}
-                          {m.role === 'agent' && m.model && (
-                            <span className="text-[9px] text-white/25 mt-0.5 px-1">
-                              {MODEL_LABEL[m.model] || m.model}
-                              {!!m.costUsd && ` · ${formatCost(m.costUsd)}`}
-                            </span>
-                          )}
-                        </div>
-                      ))
-                    )}
-                    <div ref={chatEndRef} />
+              {/* Mensajes */}
+              <div ref={chatEndRef} className="min-h-0 flex-1 overflow-y-auto bg-slate-50/60 px-4 py-5">
+                {chatLoading ? (
+                  <div className="flex justify-center py-10"><Loader2 className="h-5 w-5 animate-spin text-slate-300" /></div>
+                ) : chatMessages.length === 0 ? (
+                  <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                    <div className="mb-3 text-4xl">{selectedAgent.avatar}</div>
+                    <p className="text-[14px] font-medium text-slate-700">Habla con {selectedAgent.name}</p>
+                    <p className="mt-1 text-[13px] leading-relaxed text-slate-500">{selectedAgent.function || 'Escribe para empezar.'}</p>
                   </div>
-                </ScrollArea>
+                ) : (
+                  <div className="space-y-4">
+                    {chatMessages.map(m => {
+                      const mine = m.role === 'user'
+                      const time = new Date(m.createdAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+                      return (
+                        <div key={m.id} className={`flex gap-2.5 ${mine ? 'justify-end' : 'justify-start'}`}>
+                          {!mine && (
+                            <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-white text-[15px] shadow-sm ring-1 ring-slate-200">
+                              {selectedAgent.avatar}
+                            </div>
+                          )}
+                          <div className={`flex max-w-[85%] flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                            {m.attachments && m.attachments.length > 0 && (
+                              <div className={`mb-1 flex flex-wrap gap-1 ${mine ? 'justify-end' : ''}`}>
+                                {m.attachments.map(a => (
+                                  <span key={a.id} className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-600">
+                                    {a.mimeType.startsWith('image/') ? <ImageIcon className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
+                                    {a.filename}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {m.content && (
+                              <div className={`rounded-2xl px-3.5 py-2.5 text-[14px] leading-relaxed ${
+                                mine
+                                  ? 'whitespace-pre-wrap rounded-br-md bg-[#1f2a44] text-white'
+                                  : 'rounded-bl-md border border-slate-200 bg-white text-slate-700 shadow-sm'
+                              }`}>
+                                {mine ? m.content : <Markdown text={m.content} />}
+                              </div>
+                            )}
+                            <span className="mt-1 px-1 text-[11px] text-slate-400">
+                              {time}
+                              {!mine && m.model && ` · ${MODEL_LABEL[m.model] || m.model}`}
+                              {!mine && !!m.costUsd && ` · ${formatCost(m.costUsd)}`}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {chatSending && (
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-white text-[15px] shadow-sm ring-1 ring-slate-200">
+                          {selectedAgent.avatar}
+                        </div>
+                        <div className="flex items-center gap-1.5 rounded-2xl rounded-bl-md border border-slate-200 bg-white px-3.5 py-3 shadow-sm">
+                          {[0, 1, 2].map(i => (
+                            <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-slate-400" style={{ animationDelay: `${i * 0.15}s` }} />
+                          ))}
+                          <span className="ml-1.5 text-[12px] text-slate-400">{selectedAgent.name} está escribiendo…</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Redactar */}
+              <div className="border-t border-slate-100 bg-white px-4 pb-4 pt-3">
                 {pendingFiles.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-3">
+                  <div className="mb-2 flex flex-wrap gap-1.5">
                     {pendingFiles.map((f, i) => (
-                      <span key={i} className="flex items-center gap-1 bg-white/[0.08] border border-white/[0.08] rounded-md pl-1.5 pr-1 py-0.5 text-[10px] text-white/60">
-                        {f.mimeType.startsWith('image/') ? <ImageIcon className="w-2.5 h-2.5" /> : <FileText className="w-2.5 h-2.5" />}
+                      <span key={i} className="flex items-center gap-1 rounded-md border border-slate-200 bg-slate-50 py-0.5 pl-1.5 pr-1 text-[12px] text-slate-600">
+                        {f.mimeType.startsWith('image/') ? <ImageIcon className="h-3 w-3" /> : <FileText className="h-3 w-3" />}
                         {f.filename}
-                        <button
-                          onClick={() => setPendingFiles(prev => prev.filter((_, idx) => idx !== i))}
-                          className="ml-0.5 hover:text-white"
-                        >
-                          <X className="w-2.5 h-2.5" />
+                        <button onClick={() => setPendingFiles(prev => prev.filter((_, idx) => idx !== i))} className="ml-0.5 text-slate-400 hover:text-slate-700">
+                          <X className="h-3 w-3" />
                         </button>
                       </span>
                     ))}
                   </div>
                 )}
-                {fileError && <p className="text-red-400 text-[10px] mt-2">{fileError}</p>}
-                <div className="flex items-center gap-2 mt-3">
+                {fileError && <p className="mb-2 text-[12px] text-red-600">{fileError}</p>}
+                <div className="flex items-end gap-2 rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm focus-within:border-slate-400">
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -855,26 +908,36 @@ export default function VirtualOffice() {
                     onClick={() => fileInputRef.current?.click()}
                     disabled={chatSending}
                     title="Adjuntar archivo"
-                    className="w-8 h-8 flex-shrink-0 rounded-lg bg-white/[0.05] border border-white/[0.08] hover:bg-white/[0.1] disabled:opacity-40 flex items-center justify-center transition-colors"
+                    className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"
                   >
-                    <Paperclip className="w-3.5 h-3.5 text-white/60" />
+                    <Paperclip className="h-4 w-4" />
                   </button>
-                  <input
+                  <MicButton disabled={chatSending} onText={setChatInput} onFinal={(t) => sendChatMessage(t)} />
+                  <textarea
                     value={chatInput}
-                    onChange={e => setChatInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') sendChatMessage() }}
-                    placeholder="Escribe un mensaje..."
+                    onChange={e => {
+                      setChatInput(e.target.value)
+                      e.target.style.height = 'auto'
+                      e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`
+                    }}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChatMessage() }
+                    }}
+                    rows={1}
+                    placeholder={`Escribe a ${selectedAgent.name}…`}
                     disabled={chatSending}
-                    className="flex-1 bg-white/[0.05] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-white placeholder:text-white/25 outline-none focus:border-violet-500/50"
+                    className="max-h-40 min-h-[36px] flex-1 resize-none bg-transparent px-1 py-2 text-[14px] leading-snug text-slate-800 outline-none placeholder:text-slate-400"
                   />
                   <button
                     onClick={sendChatMessage}
                     disabled={chatSending || (!chatInput.trim() && pendingFiles.length === 0)}
-                    className="w-8 h-8 flex-shrink-0 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-40 flex items-center justify-center transition-colors"
+                    className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-[#1f2a44] text-white transition-colors hover:bg-[#2c3b5e] disabled:opacity-30"
+                    aria-label="Enviar"
                   >
-                    {chatSending ? <Loader2 className="w-3.5 h-3.5 text-white animate-spin" /> : <Send className="w-3.5 h-3.5 text-white" />}
+                    {chatSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
                 </div>
+                <p className="mt-1.5 px-1 text-[11px] text-slate-400">Enter para enviar · Mayús+Enter para salto de línea · 🎤 para dictar</p>
               </div>
             </div>
           </motion.div>

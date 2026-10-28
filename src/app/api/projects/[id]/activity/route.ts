@@ -7,7 +7,7 @@ export async function GET(
 ) {
   const { id } = await params
   const logs = await db.activityLog.findMany({
-    where: { projectId: id },
+    where: { projectId: id, type: { notIn: ['case_state', 'review', 'daily_digest', 'setting', 'push_sub'] } },
     include: {
       agent: { select: { id: true, name: true, avatar: true } },
       task: { select: { id: true, title: true } },

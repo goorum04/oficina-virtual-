@@ -1,12 +1,23 @@
 import { db } from '@/lib/db'
-import { anthropic } from '@/lib/anthropic'
 import { getInstallationOctokit } from '@/lib/github'
-import { GITHUB_TOOLS, runGithubTool } from '@/lib/github-tools'
+import { GITHUB_TOOLS } from '@/lib/github-tools'
+import { pcToolsFor } from '@/lib/pc-tools'
+import { mailToolsFor } from '@/lib/mail-tools'
+import { CALL_AGENT_ID, gestoriaToolsFor } from '@/lib/gestoria-tools'
+import { CASE_TOOL, runAgentTurn, systemPromptFor } from '@/lib/agent-turn'
+import { enqueueCaseByName } from '@/lib/case-worker'
 import { MODELS, pickModel } from '@/lib/model-router'
 import { calcCostUsd } from '@/lib/pricing'
 import { NextResponse } from 'next/server'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { Octokit } from '@octokit/rest'
+
+const ADVANCE_INTENT = /\b(avanza|avanzar|av[aá]nzame|ponte al d[ií]a|trabaja|trabajar|adelanta|sigue con|ocúpate de|ocupate de|encárgate de|encargate de)\b/i
+
+const PC_HINTS = /\b(carpeta|archivo|fichero|documento|pdf|word|excel|pc|ordenador|onedrive|disco|ejecuta|comando|escritorio|descarga|sube|subir|adjunt)/i
+
+// Un turno puede encadenar varias órdenes al PC (un comando espera hasta 2 min).
+export const maxDuration = 300
 
 export async function GET(
   _req: Request,
@@ -78,80 +89,6 @@ function attachmentContentBlocks(attachments: IncomingAttachment[]): Anthropic.C
   return blocks
 }
 
-function systemPromptFor(agent: {
-  name: string
-  role: string
-  function: string | null
-  isSpokesperson: boolean
-  githubRepo: string | null
-}, teammates: { name: string; role: string }[]) {
-  let base = `Eres ${agent.name}, ${agent.role} en un equipo de agentes de IA de una agencia de desarrollo. Tu función: ${agent.function || 'sin descripción específica'}.
-Respondes en español, de forma profesional, breve y directa, como un compañero de equipo real (no como un asistente genérico). No inventes trabajo que no se te haya descrito; si no sabes algo, dilo.`
-
-  if (agent.isSpokesperson) {
-    const team = teammates.map(t => `- ${t.name} (${t.role})`).join('\n')
-    base += `
-Además eres el portavoz/Project Manager: el humano habla contigo para pedir reportes de estado, auditorías o coordinar al resto del equipo. Estos son tus compañeros:
-${team}
-Cuando te pidan un reporte o auditoría, responde de forma estructurada y concisa. Puedes mencionar que puede hablar directamente con cualquier compañero si lo prefiere.`
-  }
-
-  if (agent.githubRepo) {
-    base += `
-Tienes acceso al repositorio de GitHub "${agent.githubRepo}" mediante herramientas: puedes listar/leer archivos, escribir cambios en una rama nueva (nunca en la rama por defecto directamente), y abrir un Pull Request. NUNCA uses github_merge_pr a menos que el humano haya confirmado explícitamente en la conversación que quiere que mergees (por ejemplo "sí", "mergéalo", "adelante"). Si no está claro, pregunta primero y espera su respuesta antes de mergear.`
-  }
-
-  return base
-}
-
-async function runAgentTurn(opts: {
-  model: string
-  system: string
-  history: Anthropic.MessageParam[]
-  tools?: Anthropic.Tool[]
-  octokit?: Octokit
-  owner?: string
-  repo?: string
-}): Promise<{ text: string; inputTokens: number; outputTokens: number }> {
-  const messages: Anthropic.MessageParam[] = [...opts.history]
-  let inputTokens = 0
-  let outputTokens = 0
-
-  for (let i = 0; i < 6; i++) {
-    const response = await anthropic.messages.create({
-      model: opts.model,
-      max_tokens: 1024,
-      system: opts.system,
-      tools: opts.tools,
-      messages,
-    })
-    inputTokens += response.usage.input_tokens
-    outputTokens += response.usage.output_tokens
-
-    if (response.stop_reason !== 'tool_use') {
-      const text = response.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-        .map(b => b.text)
-        .join('\n') || '(sin respuesta)'
-      return { text, inputTokens, outputTokens }
-    }
-
-    messages.push({ role: 'assistant', content: response.content })
-
-    const toolResults: Anthropic.ToolResultBlockParam[] = []
-    for (const block of response.content) {
-      if (block.type === 'tool_use') {
-        const result = opts.octokit && opts.owner && opts.repo
-          ? await runGithubTool(opts.octokit, opts.owner, opts.repo, block.name, block.input as Record<string, unknown>)
-          : 'GitHub tools not available for this agent.'
-        toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result })
-      }
-    }
-    messages.push({ role: 'user', content: toolResults })
-  }
-
-  return { text: '(demasiados pasos de herramientas en esta petición, intenta algo más simple)', inputTokens, outputTokens }
-}
 
 export async function POST(
   req: Request,
@@ -182,6 +119,18 @@ export async function POST(
     include: { attachments: { select: { id: true, filename: true, mimeType: true } } },
   })
 
+  // "Avanza con Bencheikh", "ponte al día con Coskun"…: se encarga el
+  // expediente al gestor de caso directamente, sin depender de que el modelo
+  // elija la herramienta (y sin gastar IA en esta respuesta).
+  if (typeof message === 'string' && ADVANCE_INTENT.test(message) && gestoriaToolsFor(agent).length) {
+    const target = message.replace(new RegExp(ADVANCE_INTENT.source, 'gi'), ' ').replace(/\b(con|el|la|los|de|del|caso|expediente|cliente|por favor)\b/gi, ' ').replace(/[^\p{L}\s'-]/gu, ' ').trim()
+    if (target.length >= 3) {
+      const reply = await enqueueCaseByName(target)
+      const agentMessage = await db.message.create({ data: { role: 'agent', content: reply, agentId: id } })
+      return NextResponse.json({ userMessage, agentMessage })
+    }
+  }
+
   if (!process.env.ANTHROPIC_API_KEY) {
     const fallback = await db.message.create({
       data: {
@@ -200,12 +149,16 @@ export async function POST(
       })
     : []
 
-  const history = await db.message.findMany({
+  const isCallAgent = agent.id === CALL_AGENT_ID
+
+  // Los mensajes más recientes (no los primeros de la conversación), en
+  // orden cronológico. El agente de llamadas solo necesita los últimos.
+  const history = (await db.message.findMany({
     where: { agentId: id },
-    orderBy: { createdAt: 'asc' },
-    take: 20,
+    orderBy: { createdAt: 'desc' },
+    take: isCallAgent ? 6 : 10,
     include: { attachments: { select: { filename: true } } },
-  })
+  })).reverse()
 
   let octokit: Octokit | undefined
   let owner: string | undefined
@@ -218,18 +171,47 @@ export async function POST(
     }
   }
 
+  const gestoriaTools = gestoriaToolsFor(agent)
+
+  // Sus tareas abiertas en la oficina (p.ej. las de clientes prioritarios),
+  // para que sepa en qué está trabajando.
+  const openTasks = await db.task.findMany({
+    where: { agentId: id, status: { not: 'completed' } },
+    select: { title: true, description: true },
+    take: 15,
+  })
+  const tasksNote = openTasks.length
+    ? `[Contexto de la oficina, no lo repitas tal cual: tus tareas abiertas ahora mismo, asignadas en el repaso de clientes prioritarios. Es tu trabajo actual aunque antes en la conversación dijeras otra cosa:\n${openTasks.map(t => `- ${t.title}${t.description ? ` (${t.description.replace(/\n/g, '; ').slice(0, 160)})` : ''}`).join('\n')}]\n\n`
+    : ''
+  // El agente de llamadas no usa el PC: cada herramienta de más hace la
+  // respuesta más lenta.
+  // Las fichas de las herramientas del PC son largas: solo se mandan cuando
+  // el mensaje (o lo último de la conversación) va de archivos o del PC.
+  const recentText = [message || '', ...history.slice(-3).map(m => m.content)].join(' ')
+  const wantsPc = attachments.length > 0 || PC_HINTS.test(recentText)
+  const pcTools = isCallAgent || !wantsPc ? [] : pcToolsFor()
+  const mailTools = mailToolsFor(agent)
+  const tools = [
+    ...gestoriaTools, ...mailTools, ...pcTools,
+    ...(gestoriaTools.length && !isCallAgent ? [CASE_TOOL] : []),
+    ...(agent.githubRepo ? GITHUB_TOOLS : []),
+  ]
+
   await db.agent.update({ where: { id }, data: { status: 'thinking' } })
 
-  const tier = pickModel(message || (attachments.length ? 'analiza este archivo' : ''), agent)
+  const tier = isCallAgent ? 'haiku' : pickModel(message || (attachments.length ? 'analiza este archivo' : ''), agent)
 
   try {
-    const { text, inputTokens, outputTokens } = await runAgentTurn({
+    const { text, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens } = await runAgentTurn({
       model: MODELS[tier],
-      system: systemPromptFor(agent, teammates),
+      system: systemPromptFor(agent, teammates, gestoriaTools.length > 0, pcTools.length > 0, mailTools.length > 0),
       history: history.map(m => {
-        if (m.id === userMessage.id && attachments.length) {
+        // Las tareas van pegadas al mensaje actual: el modelo las tiene más
+        // en cuenta que al final de las instrucciones, y estas no cambian
+        // (mejor para la caché).
+        if (m.id === userMessage.id) {
           const blocks = attachmentContentBlocks(attachments)
-          if (m.content) blocks.push({ type: 'text', text: m.content })
+          blocks.push({ type: 'text', text: tasksNote + (m.content || '(archivo adjunto)') })
           return { role: 'user', content: blocks }
         }
         const placeholder = m.attachments.length
@@ -240,13 +222,25 @@ export async function POST(
           content: (m.content || '(archivo adjunto)') + placeholder,
         }
       }),
-      tools: agent.githubRepo ? GITHUB_TOOLS : undefined,
+      tools: tools.length ? tools : undefined,
       octokit,
       owner,
       repo,
+      agentId: id,
+      // Lo que cambia en GestoriaAD aparece también en la actividad de la oficina.
+      onWrite: async (toolName) => {
+        await db.activityLog.create({
+          data: {
+            type: 'agent_message',
+            message: `${agent.name}: ${toolName.replace(/^(gestoria|pc)_/, '').replace(/_/g, ' ')} ${toolName.startsWith('pc_') ? 'en el PC' : 'en GestoriaAD'}`,
+            agentId: id,
+            projectId: agent.projectId,
+          },
+        })
+      },
     })
 
-    const costUsd = calcCostUsd(tier, inputTokens, outputTokens)
+    const costUsd = calcCostUsd(tier, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
     const agentMessage = await db.message.create({
       data: { role: 'agent', content: text, model: tier, inputTokens, outputTokens, costUsd, agentId: id },
     })
