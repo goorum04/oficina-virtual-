@@ -938,7 +938,7 @@ function Workstation({ agent, deskPos, chairPos, rotation, onClick }: {
       <Desk position={deskPos} rotation={rotation} status={agent.status} />
       <Chair position={chairPos} rotation={rotation} />
       <AgentCharacter agent={agent} position={[chairPos[0], 0, chairPos[2]]} deskRotation={rotation} onClick={onClick} scale={1.35} />
-      {agent.activity && <ActivityBubble text={agent.activity} position={[chairPos[0], 2.55, chairPos[2]]} />}
+      {agent.activity && <ActivityBubble text={agent.activity} position={[chairPos[0], 3.0, chairPos[2]]} />}
     </group>
   )
 }
@@ -1137,7 +1137,7 @@ function ExecutiveWorkstation({ agent, onClick }: { agent: Agent3D; onClick?: ()
       <ExecutiveDesk position={EXEC_DESK} rotation={0} status={agent.status} />
       <ExecutiveChair position={EXEC_CHAIR} rotation={0} />
       <AgentCharacter agent={agent} position={[EXEC_CHAIR[0], 0, EXEC_CHAIR[2]]} deskRotation={0} onClick={onClick} scale={1.4} />
-      {agent.activity && <ActivityBubble text={agent.activity} position={[EXEC_CHAIR[0], 2.6, EXEC_CHAIR[2]]} />}
+      {agent.activity && <ActivityBubble text={agent.activity} position={[EXEC_CHAIR[0], 3.05, EXEC_CHAIR[2]]} />}
     </group>
   )
 }
