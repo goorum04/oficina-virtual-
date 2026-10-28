@@ -15,7 +15,7 @@ export async function GET() {
       where: { type: 'review', NOT: { metadata: { contains: '"status":"pending"' } } },
       include: { agent: { select: { name: true } } },
       orderBy: { createdAt: 'desc' },
-      take: 15,
+      take: 30,
     }),
     db.activityLog.findFirst({ where: { type: 'daily_digest' }, orderBy: { createdAt: 'desc' } }),
   ])

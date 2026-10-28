@@ -25,6 +25,7 @@ export const FOCUS_CLIENTS: Array<{ name: string; clientId: string | null }> = [
   { name: 'Nicolas Bordeau', clientId: 'cmvqrnp8b0000jm0773sgiw3p' },
   { name: 'Christopher Gonzalez', clientId: 'cmtvn2bmx00icl504ys8pxcfh' },
   { name: 'Johanna Douar', clientId: 'cmvqrnpee0001jm07pbyzcufl' },
+  { name: 'Henri Grolleau', clientId: 'cmtvlqtem0002jv04plid4e5z' },
 ]
 
 // Dos repasos al día en horario de oficina (≈8:00 y ≈14:00).

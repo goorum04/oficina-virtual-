@@ -25,6 +25,7 @@ export type ReviewData = {
   // Documento de GestoriaAD
   docId?: string
   resultado?: string
+  resolvedAt?: string
   // Cliente nuevo propuesto (se crea en GestoriaAD al aprobarlo)
   nuevo?: { firstName: string; lastName: string; email: string; notes?: string }
 }
