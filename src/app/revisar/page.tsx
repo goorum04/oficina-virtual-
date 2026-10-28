@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Bell, BellOff, Loader2 } from 'lucide-react'
 import { ReviewContent } from '@/components/office/ReviewPanel'
+import AskRayo from '@/components/office/AskRayo'
 
 // Versión para el móvil del panel "Para revisar": a pantalla completa, con
 // avisos (Web Push). En iPhone hay que añadirla antes a la pantalla de
@@ -65,10 +66,11 @@ export default function RevisarPage() {
   )
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-white text-slate-800">
+    <div className="relative flex h-[100dvh] flex-col bg-white text-slate-800">
       <ReviewContent action={pushButton} />
       {hint && <p className="border-t border-slate-100 px-4 py-2 text-[12px] text-red-600">{hint}</p>}
-      <a href="/" className="border-t border-slate-100 py-3 text-center text-[13px] text-slate-500">Ir a la oficina</a>
+      <AskRayo />
+      <a href="/" className="border-t border-slate-100 bg-white py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] text-center text-[13px] text-slate-500">Ir a la oficina</a>
     </div>
   )
 }
