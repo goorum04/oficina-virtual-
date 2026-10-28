@@ -8,6 +8,7 @@ import { clientBriefing } from '@/lib/client-briefing'
 import { MODELS } from '@/lib/model-router'
 import { calcCostUsd } from '@/lib/pricing'
 import { andorraHour } from '@/lib/work-hours'
+import { clientFolders, clientsWithoutOdm, findOdmDate } from '@/lib/odm-dates'
 
 // Trabajos de una vez al día (a partir de las 9:00, con las consultas del
 // puente del PC). Todo lo que escribe a clientes queda en "Para revisar":
@@ -81,6 +82,10 @@ export async function maybeDailyJobs(aiAllowed = true): Promise<void> {
   if (cal) await syncCalendar(cal)
   const chase = await acquire('doc_chasers')
   if (chase) await docChasers(chase)
+  if (aiAllowed) {
+    const odm = await acquire('odm_dates')
+    if (odm) await odmDates(odm)
+  }
   const monday = new Intl.DateTimeFormat('en-US', { timeZone: 'Europe/Andorra', weekday: 'short' }).format(new Date()) === 'Mon'
   if (aiAllowed && monday) {
     const status = await acquire('status_reports')
@@ -211,6 +216,37 @@ Responde SOLO con JSON: {"asunto":"…","texto":"…"}`,
     })
   }
   await save(job, `Nova: ${out.length ? `estado del trámite para ${out.join(', ')}` : 'nadie sin noticias esta semana'}`)
+}
+
+// ── Fecha de inicio (ODM) ──────────────────────────────────────────────────
+// Los clientes ya mirados salen de la lista (odm_try), así que cada tanda
+// empieza por el principio de lo que queda.
+async function odmDates(job: Job): Promise<void> {
+  const folders = await clientFolders()
+  const deadline = Date.now() + SLICE_MS
+  for (const c of await clientsWithoutOdm()) {
+    if (Date.now() > deadline) {
+      job.state.heartbeat = 0
+      await save(job)
+      return
+    }
+    const r = await findOdmDate(c, folders).catch(() => ({ line: null, costUsd: 0 }))
+    job.state.costUsd += r.costUsd
+    if (r.line) (/\d{2}\/\d{2}\/\d{4}/.test(r.line) ? job.state.out : job.state.extra).push(r.line)
+    job.state.heartbeat = Date.now()
+    await save(job)
+  }
+  job.state.finished = true
+  const { out, extra, costUsd } = job.state
+  if (out.length || extra.length) {
+    await db.message.create({
+      data: {
+        role: 'agent', model: 'haiku', costUsd, agentId: 't-cli',
+        content: `📅 **Fecha de inicio (firma de la ODM)**${out.length ? `\n\nPuesta en GestoriaAD:\n${out.map((l) => `- ${l}`).join('\n')}` : ''}${extra.length ? `\n\nSin fecha:\n${extra.map((l) => `- ${l}`).join('\n')}` : ''}`,
+      },
+    })
+  }
+  await save(job, `Clara: fecha de la ODM puesta a ${out.length} cliente(s)${extra.length ? `; ${extra.length} sin ODM o sin fecha` : ''}`)
 }
 
 // ── Agenda ────────────────────────────────────────────────────────────────
