@@ -11,6 +11,7 @@ export const maxDuration = 120
 // - send: enviar el correo (con el texto editado si se pasa "texto").
 // - done: visto / aprobado (documentos, fichas, pasos).
 // - create: dar de alta el cliente nuevo propuesto en GestoriaAD.
+// - restore: recuperar lo descartado hoy (vuelve el borrador o el documento).
 // - discard: descartar (borra el borrador de Outlook o el documento de GestoriaAD).
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -18,6 +19,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const row = await db.activityLog.findUnique({ where: { id } })
   if (!row || row.type !== 'review') return NextResponse.json({ error: 'No existe' }, { status: 404 })
   const data = JSON.parse(row.metadata || '{}') as ReviewData
+  if (action === 'restore') return restore(row.id, row.message, row.agentId, row.createdAt, data)
   if (data.status !== 'pending') return NextResponse.json({ error: 'Ya está resuelto' }, { status: 409 })
 
   let resultado = ''
@@ -51,6 +53,36 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   data.resultado = resultado || undefined
+  data.resolvedAt = new Date().toISOString()
   await db.activityLog.update({ where: { id }, data: { metadata: JSON.stringify(data) } })
   return NextResponse.json({ ok: true, resultado })
+}
+
+const andorraDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Andorra' }).format(d)
+
+// Lo descartado se borró de Outlook o de GestoriaAD: se vuelve a crear con
+// lo guardado aquí y el elemento vuelve a "Pendiente".
+async function restore(id: string, title: string, agentId: string | null, createdAt: Date, data: ReviewData) {
+  if (data.status !== 'discarded') return NextResponse.json({ error: 'Solo se recupera lo descartado' }, { status: 409 })
+  const when = data.resolvedAt ? new Date(data.resolvedAt) : createdAt
+  if (andorraDay(when) !== andorraDay(new Date())) return NextResponse.json({ error: 'Solo se recupera lo descartado hoy' }, { status: 409 })
+
+  if (data.kind === 'mail') {
+    const res = await runPcCommand('mail_draft', {
+      texto: data.texto, responderA: data.responderA, para: data.para, asunto: data.asunto, cuenta: OUTLOOK_ACCOUNT,
+    }, agentId ?? 't-mail', 90_000)
+    if (!res.ok) return NextResponse.json({ error: `No se pudo rehacer el borrador: ${toToolText(res.data)}` }, { status: 502 })
+    data.draftId = typeof res.data === 'object' && res.data ? (res.data as { id?: string }).id : undefined
+  } else if (data.kind === 'document' && data.clientId && data.texto) {
+    const res = await gestoriaFetch('POST', `/api/clients/${encodeURIComponent(data.clientId)}/generated-documents`, {
+      title: title.replace(/^Documento redactado: /, ''), content: data.texto, format: 'md',
+    })
+    if (!res.ok) return NextResponse.json({ error: `No se pudo rehacer el documento (${res.status})` }, { status: 502 })
+    data.docId = (res.data as { id?: string }).id
+  }
+  data.status = 'pending'
+  data.resultado = undefined
+  data.resolvedAt = undefined
+  await db.activityLog.update({ where: { id }, data: { metadata: JSON.stringify(data) } })
+  return NextResponse.json({ ok: true })
 }

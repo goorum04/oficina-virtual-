@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
-import { Check, FileText, Loader2, Mail, Pencil, Send, Trash2, UserPlus, UserRound, X, ListChecks, Sun } from 'lucide-react'
+import { Check, FileText, Loader2, Mail, Pencil, Send, Trash2, Undo2, UserPlus, UserRound, X, ListChecks, Sun } from 'lucide-react'
 import Markdown from '@/components/office/Markdown'
 
 // Panel "Para revisar": lo que preparan los agentes, para aprobar con un clic.
@@ -20,6 +20,7 @@ export type ReviewItem = {
   para?: string
   asunto?: string
   resultado?: string
+  resolvedAt?: string
 }
 
 type ReviewData = { pending: ReviewItem[]; recent: ReviewItem[]; digest: { createdAt: string; text: string } | null }
@@ -138,18 +139,45 @@ export function ReviewContent({ onChange, action }: { onChange?: () => void; act
             {data.recent.length > 0 && (
               <>
                 <p className="pt-3 text-[12px] font-medium uppercase tracking-wide text-slate-400">Resuelto hace poco</p>
-                {data.recent.map((item) => (
-                  <div key={item.id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] text-slate-500">
-                    <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px]">{STATUS_LABEL[item.status] ?? item.status}</span>
-                    <span className="truncate">{item.title}</span>
-                  </div>
-                ))}
+                {data.recent.map((item) => <RecentRow key={item.id} item={item} onRestored={resolved} />)}
               </>
             )}
           </div>
         )}
       </div>
     </>
+  )
+}
+
+const andorraDay = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Andorra' }).format(d)
+
+// Lo resuelto; lo descartado hoy se puede recuperar (vuelve a "Pendiente").
+function RecentRow({ item, onRestored }: { item: ReviewItem; onRestored: () => void }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const restorable = item.status === 'discarded' && andorraDay(new Date(item.resolvedAt ?? item.createdAt)) === andorraDay(new Date())
+  const restore = async () => {
+    setBusy(true)
+    setError('')
+    const res = await fetch(`/api/review/${item.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'restore' }) })
+    const d = await res.json().catch(() => ({}))
+    if (res.ok) onRestored()
+    else { setError(d.error || `Error ${res.status}`); setBusy(false) }
+  }
+  return (
+    <div className="rounded-lg px-2 py-1.5 text-[13px] text-slate-500">
+      <div className="flex items-center gap-2">
+        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px]">{STATUS_LABEL[item.status] ?? item.status}</span>
+        <span className="min-w-0 flex-1 truncate">{item.title}</span>
+        {restorable && (
+          <button onClick={restore} disabled={busy} className="flex flex-shrink-0 items-center gap-1 rounded-md border border-slate-200 px-2 py-0.5 text-[12px] font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60">
+            {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Undo2 className="h-3 w-3" />}
+            Recuperar
+          </button>
+        )}
+      </div>
+      {error && <p className="mt-1 text-[12px] text-red-600">{error}</p>}
+    </div>
   )
 }
 
