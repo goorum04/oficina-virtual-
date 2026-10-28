@@ -11,6 +11,7 @@ const { exec, execFile } = require('child_process')
 
 const MAX_READ_BYTES = 3 * 1024 * 1024 // la oficina (Vercel) no acepta respuestas de más de ~4,5 MB
 const MAX_TEXT_CHARS = 200_000
+const MAX_CHUNKED_BYTES = 30 * 1024 * 1024
 const MAX_LIST = 500
 const MAX_SEARCH_RESULTS = 200
 const MAX_SEARCH_DIRS = 20_000
@@ -142,10 +143,20 @@ const handlers = {
     return { resultados: results, incompleto: queue.length > 0 }
   },
 
-  read({ path: p, binary }) {
+  read({ path: p, binary, offset, length }) {
     const file = checkPath(p)
     const st = fs.statSync(file)
     if (st.isDirectory()) throw new Error('Es una carpeta: usa listar')
+    // Archivos grandes: la oficina los pide por trozos (cada respuesta debe
+    // caber en el límite de Vercel) y los junta allí.
+    if (offset != null) {
+      if (st.size > MAX_CHUNKED_BYTES) throw new Error(`Archivo demasiado grande (${st.size} bytes, máx. ${MAX_CHUNKED_BYTES})`)
+      const len = Math.min(Number(length) || MAX_READ_BYTES, MAX_READ_BYTES, Math.max(0, st.size - Number(offset)))
+      const buf = Buffer.alloc(len)
+      const fd = fs.openSync(file, 'r')
+      try { fs.readSync(fd, buf, 0, len, Number(offset)) } finally { fs.closeSync(fd) }
+      return { type: 'chunk', name: path.basename(file), mimeType: MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', size: st.size, offset: Number(offset), base64: buf.toString('base64') }
+    }
     if (st.size > MAX_READ_BYTES) throw new Error(`Archivo demasiado grande (${st.size} bytes, máx. ${MAX_READ_BYTES})`)
     const buf = fs.readFileSync(file)
     const ext = path.extname(file).toLowerCase()
@@ -357,7 +368,44 @@ if ($env:BR_REPLY_ID) {
   $d.Body = $env:BR_BODY
 }
 $d.Save()
-ConvertTo-Json -Compress -InputObject ('Borrador guardado en Outlook (sin enviar): ' + $d.Subject)
+ConvertTo-Json -Compress -InputObject ([ordered]@{ mensaje = ('Borrador guardado en Outlook (sin enviar): ' + $d.Subject); id = $d.EntryID })
+`,
+  // Enviar un borrador aprobado en el panel "Para revisar" con el texto
+  // final (el humano puede haberlo cambiado). Si era respuesta a un correo,
+  // se responde de nuevo a ese correo (con la firma y el hilo citado) y se
+  // borra el borrador; si era un correo nuevo, se envía el propio borrador.
+  mail_send_draft: `
+$sig = ''
+$dir = Join-Path $env:APPDATA 'Microsoft\\Signatures'
+if (Test-Path $dir) {
+  $files = @(Get-ChildItem $dir -Filter *.txt | Sort-Object LastWriteTime -Descending)
+  $pick = $files | Where-Object { $_.BaseName -like ('*' + ($env:BR_ACCOUNT -split '@')[0] + '*') } | Select-Object -First 1
+  if (-not $pick) { $pick = $files | Select-Object -First 1 }
+  if ($pick) { $sig = Get-Content $pick.FullName -Raw -Encoding Default }
+}
+$text = [string]$env:BR_BODY + $(if ($sig) { "\r\n\r\n" + $sig } else { '' })
+$draft = $null
+if ($env:BR_ID) { try { $draft = GetMail $env:BR_ID } catch {} }
+if ($env:BR_REPLY_ID) {
+  $orig = GetMail $env:BR_REPLY_ID
+  $r = $orig.Reply()
+  $r.Body = $text + "\r\n\r\n" + $r.Body
+  $r.Send()
+  if ($draft -and -not $draft.Sent) { try { $draft.Delete() } catch {} }
+  ConvertTo-Json -Compress -InputObject ('Enviado a ' + $orig.SenderName + ': ' + $orig.Subject)
+} else {
+  if (-not $draft) { throw 'No encuentro el borrador en Outlook (¿lo has borrado o enviado ya?)' }
+  $draft.Body = $text
+  $subject = $draft.Subject
+  $draft.Send()
+  ConvertTo-Json -Compress -InputObject ('Enviado: ' + $subject)
+}
+`,
+  mail_discard_draft: `
+$d = GetMail $env:BR_ID
+$subject = $d.Subject
+$d.Delete()
+ConvertTo-Json -Compress -InputObject ('Borrador descartado: ' + $subject)
 `,
   mail_list: `
 $since = if ($env:BR_SINCE) { [datetime]::Parse($env:BR_SINCE) } else { (Get-Date).AddDays(-2) }
@@ -482,6 +530,15 @@ Object.assign(handlers, {
       BR_TO: String(para || ''), BR_SUBJECT: String(asunto || ''), BR_BODY: String(texto),
     })
   },
+  mail_send_draft({ id, responderA, texto, cuenta }) {
+    if (!cfg.allowSendMail) throw new Error('Este PC no permite enviar correos ("allowSendMail": false en config.json)')
+    if ((!id && !responderA) || !String(texto || '').trim()) throw new Error('Falta el borrador o el texto')
+    return runOutlook('mail_send_draft', { BR_ID: String(id || ''), BR_REPLY_ID: String(responderA || ''), BR_BODY: String(texto), BR_ACCOUNT: cuenta ? String(cuenta) : '' })
+  },
+  mail_discard_draft({ id, cuenta }) {
+    if (!id) throw new Error('Falta el borrador')
+    return runOutlook('mail_discard_draft', { BR_ID: String(id), BR_ACCOUNT: cuenta ? String(cuenta) : '' })
+  },
   mail_list({ desde, max, soloNoLeidos, cuenta }) {
     return runOutlook('mail_list', {
       BR_ACCOUNT: cuenta ? String(cuenta) : '',
@@ -525,6 +582,8 @@ function describe(cmd) {
     case 'mail_draft': return `CORREO: guardar borrador "${p.asunto || 'respuesta'}" (sin enviar)`
     case 'mail_categorize': return `CORREO: clasificar como ${p.categoria}`
     case 'mail_move': return `CORREO: mover a ${p.carpeta}`
+    case 'mail_send_draft': return 'CORREO: ENVIAR un borrador aprobado en la oficina'
+    case 'mail_discard_draft': return 'CORREO: descartar un borrador'
     default: return `${cmd.kind.toUpperCase()}: ${p.path}`
   }
 }

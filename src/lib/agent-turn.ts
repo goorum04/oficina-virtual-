@@ -5,6 +5,7 @@ import { isMailTool, isMailWriteTool, runMailTool } from '@/lib/mail-tools'
 import { MAIL_CATEGORIES, OUTLOOK_ACCOUNT } from '@/lib/mail-tools'
 import { AGENT_AREAS, AREA_LABELS, CALL_AGENT_ID, MAIL_AGENT_ID, isGestoriaTool, isGestoriaWriteTool, runGestoriaTool } from '@/lib/gestoria-tools'
 import type Anthropic from '@anthropic-ai/sdk'
+import { reviewFromGestoriaWrite } from '@/lib/review'
 import type { Octokit } from '@octokit/rest'
 
 // Pone un expediente en la cola del gestor de caso (case-worker.ts).
@@ -176,6 +177,7 @@ export async function runAgentTurn(opts: {
         } else if (isGestoriaTool(block.name)) {
           result = await runGestoriaTool(block.name, block.input as Record<string, unknown>)
           if (isGestoriaWriteTool(block.name) && !result.startsWith('Error') && !result.startsWith('No ejecutado')) {
+            await reviewFromGestoriaWrite(block.name, block.input as Record<string, unknown>, result, opts.agentId).catch(() => {})
             await opts.onWrite?.(block.name)
           }
         } else {

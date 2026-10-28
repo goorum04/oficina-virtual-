@@ -3,7 +3,7 @@ import { anthropic } from '@/lib/anthropic'
 import { officeProtected } from '@/lib/access'
 import { gestoriaConfigured, gestoriaFetch } from '@/lib/gestoria'
 import { pcConfigured, runPcCommand } from '@/lib/pc'
-import { MAIL_CATEGORIES, OUTLOOK_ACCOUNT } from '@/lib/mail-tools'
+import { MAIL_CATEGORIES, OUTLOOK_ACCOUNT, saveDraft } from '@/lib/mail-tools'
 import { MAIL_AGENT_ID } from '@/lib/gestoria-tools'
 import { MODELS } from '@/lib/model-router'
 import { calcCostUsd } from '@/lib/pricing'
@@ -206,7 +206,7 @@ ${pending.map((m, i) => `#${i + 1} | ${m.recibido} | De: ${m.de} <${m.email}> | 
             sent = res.ok
           }
           if (!sent) {
-            await runPcCommand('mail_draft', { responderA: mail.id, texto: reply.texto, cuenta: OUTLOOK_ACCOUNT }, agent.id, 60_000)
+            await saveDraft({ responderA: mail.id, texto: reply.texto, asunto: mail.asunto }, agent.id, client.name)
           }
           if (sent) repliesLeft--
           await db.activityLog.create({

@@ -6,7 +6,8 @@ import { io, Socket } from 'socket.io-client'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Briefcase, FolderOpen, Users, Loader2, Play, X,
-  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, ChevronDown, MessageSquare, Send, Crown, Github, Paperclip, FileText, Image as ImageIcon, Euro
+  Activity, Zap, CheckCircle2, AlertTriangle, Brain, Sparkles, Clock, ChevronRight, ChevronDown, MessageSquare, Send, Crown, Github, Paperclip, FileText, Image as ImageIcon, Euro,
+  Inbox,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -17,6 +18,7 @@ import { Separator } from '@/components/ui/separator'
 const Scene3D = dynamic(() => import('@/components/office/Scene3D'), { ssr: false })
 import type { Agent3D } from '@/components/office/Scene3D'
 import Markdown from '@/components/office/Markdown'
+import ReviewPanel, { useReviewCount } from '@/components/office/ReviewPanel'
 import { isOffHours, WORK_START_HOUR } from '@/lib/work-hours'
 
 /* ═══════════════════════ TYPES ═══════════════════════ */
@@ -83,6 +85,8 @@ export default function VirtualOffice() {
   const [currentProject, setCurrentProject] = useState<ProjectDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedAgent, setSelectedAgent] = useState<Agent & { tasks: Task[] } | null>(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [reviewCount, refreshReviewCount] = useReviewCount()
   const [simulating, setSimulating] = useState(false)
   const [logs, setLogs] = useState<ActivityLog[]>([])
   const socketRef = useRef<Socket | null>(null)
@@ -248,13 +252,16 @@ export default function VirtualOffice() {
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [chatMessages, chatSending])
 
-  // Esc cierra el panel del agente.
+  // Esc cierra el panel abierto (agente o "Para revisar").
   useEffect(() => {
-    if (!selectedAgent) return
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelectedAgent(null) }
+    if (!selectedAgent && !reviewOpen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setSelectedAgent(null); setReviewOpen(false) } }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [selectedAgent])
+  }, [selectedAgent, reviewOpen])
+
+  // Un panel a la vez.
+  useEffect(() => { if (selectedAgent) setReviewOpen(false) }, [selectedAgent])
 
   const sendChatMessage = useCallback(async () => {
     const text = chatInput.trim()
@@ -568,6 +575,18 @@ export default function VirtualOffice() {
               </a>
             )}
 
+            <Button
+              onClick={() => { setSelectedAgent(null); setReviewOpen(true) }}
+              size="sm"
+              className="rounded-xl bg-white hover:bg-slate-100 text-slate-900 shadow-lg border-0"
+            >
+              <Inbox className="w-3.5 h-3.5 mr-1.5" />
+              Para revisar
+              {reviewCount > 0 && (
+                <span className="ml-1.5 rounded-full bg-red-500 px-1.5 text-[11px] font-semibold leading-[18px] text-white">{reviewCount}</span>
+              )}
+            </Button>
+
             {allAgents.some(a => a.isSpokesperson) && (
               <Button
                 onClick={() => setSelectedAgent(allAgents.find(a => a.isSpokesperson) || null)}
@@ -694,6 +713,9 @@ export default function VirtualOffice() {
       {/* ══════ AGENT PANEL + CHAT ══════ */}
       {/* Panel sólido y a toda altura: legible sobre la escena (sin
           transparencias), con el chat como protagonista. */}
+      <AnimatePresence>
+        {reviewOpen && <ReviewPanel key="review" onClose={() => setReviewOpen(false)} onChange={refreshReviewCount} />}
+      </AnimatePresence>
       <AnimatePresence>
         {selectedAgent && (
           <motion.div

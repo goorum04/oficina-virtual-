@@ -161,6 +161,30 @@ const TOOLS: GestoriaTool[] = [
     request: (i) => ({ method: 'PUT', path: `/api/clients/${id(i.clientId)}`, body: withoutKeys(i, ['clientId']) }),
   },
   {
+    area: 'clientes',
+    name: 'gestoria_completar_ficha',
+    description: 'Rellena SOLO los datos de la ficha de un cliente que están vacíos (lo que ya tiene valor no se toca nunca). Devuelve lo rellenado y lo que se ignoró por tener ya valor.',
+    properties: { clientId: str, ...withoutKeys(CLIENT_FIELDS, ['firstName', 'lastName', 'status', 'riskLevel', 'isPEP', 'notes', 'odmDate']) },
+    required: ['clientId'],
+    run: async (i) => {
+      const clientId = id(i.clientId)
+      const current = await gestoriaFetch('GET', `/api/clients/${clientId}`)
+      if (!current.ok) throw new Error(`No se pudo leer la ficha (${current.status})`)
+      const c = current.data as Record<string, unknown>
+      const rellenados: Record<string, unknown> = {}
+      const ignorados: string[] = []
+      for (const [k, v] of Object.entries(withoutKeys(i, ['clientId', 'confirmado']))) {
+        if (v == null || String(v).trim() === '') continue
+        if (c[k] != null && String(c[k]).trim() !== '') ignorados.push(k)
+        else rellenados[k] = v
+      }
+      if (!Object.keys(rellenados).length) return { rellenados, ignorados, nota: 'Nada que rellenar' }
+      const res = await gestoriaFetch('PUT', `/api/clients/${clientId}`, rellenados)
+      if (!res.ok) throw new Error(`GestoriaAD respondió ${res.status}`)
+      return { rellenados, ignorados }
+    },
+  },
+  {
     area: 'clientes', needsConfirmation: true,
     name: 'gestoria_borrar_cliente',
     description: 'Borra un cliente con todos sus procesos, alertas y documentos.',

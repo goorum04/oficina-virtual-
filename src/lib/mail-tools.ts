@@ -5,6 +5,8 @@ import { pcConfigured, runPcCommand } from '@/lib/pc'
 import { MAIL_AGENT_ID } from '@/lib/gestoria-tools'
 import type { ToolOutput } from '@/lib/pc-tools'
 import { OFFICE_EXTS, officeText } from '@/lib/office-text'
+import { addReview } from '@/lib/review'
+import { pdfForModel } from '@/lib/pdf-pages'
 
 // Correo de Outlook leído en el propio PC a través del puente (órdenes
 // mail_* de pc-bridge, que usan el Outlook de escritorio). Son órdenes fijas
@@ -130,7 +132,12 @@ export async function runMailTool(name: string, input: Record<string, unknown>, 
     if (!res.ok) return `Error en el PC: ${toToolText(res.data)}`
     const file = res.data as { name: string; size: number; base64: string }
     const ext = (file.name.match(/\.[^.]+$/)?.[0] || '').toLowerCase()
-    if (ext === '.pdf') return [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: file.base64 } }]
+    if (ext === '.pdf') {
+      const pdf = await pdfForModel(file.base64)
+      const blocks: Exclude<ToolOutput, string> = [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf.base64 } }]
+      if (pdf.note) blocks.push({ type: 'text', text: pdf.note.replace(/ Para otras.*$/, '') })
+      return blocks
+    }
     if (IMAGE_TYPES[ext]) return [{ type: 'image', source: { type: 'base64', media_type: IMAGE_TYPES[ext] as 'image/png', data: file.base64 } }]
     if (['.txt', '.csv', '.md'].includes(ext)) return Buffer.from(file.base64, 'base64').toString('utf8').slice(0, 30_000)
     if (OFFICE_EXTS.includes(ext)) return `Contenido de "${file.name}":\n${officeText(file.name, file.base64)}`
@@ -143,8 +150,8 @@ export async function runMailTool(name: string, input: Record<string, unknown>, 
     correo_clasificar: 'mail_categorize',
     correo_mover: 'mail_move',
     correo_buscar: 'mail_search',
-    correo_borrador: 'mail_draft',
   }[name]
+  if (name === 'correo_borrador') return saveDraft(input, agentId)
   if (!kind) return `Herramienta desconocida: ${name}`
   if (name === 'correo_clasificar' && !MAIL_CATEGORIES.includes(String(input.categoria))) {
     return `Error: categoría no válida. Usa una de: ${MAIL_CATEGORIES.join(', ')}`
@@ -155,6 +162,24 @@ export async function runMailTool(name: string, input: Record<string, unknown>, 
     return res.ok ? toToolText(res.data) : `Error en el PC: ${toToolText(res.data)}`
   } catch (err) {
     return `Error en ${name}: ${err instanceof Error ? err.message : 'desconocido'}`
+  }
+}
+
+// Borrador en Outlook + elemento en "Para revisar" (desde ahí se envía,
+// se edita o se descarta con un clic).
+export async function saveDraft(input: Record<string, unknown>, agentId: string, cliente?: string): Promise<string> {
+  try {
+    const res = await runPcCommand('mail_draft', { ...input, cuenta: OUTLOOK_ACCOUNT }, agentId, 90_000)
+    if (!res.ok) return `Error en el PC: ${toToolText(res.data)}`
+    const draftId = typeof res.data === 'object' && res.data ? (res.data as { id?: string }).id : undefined
+    const asunto = typeof input.asunto === 'string' && input.asunto ? input.asunto : undefined
+    await addReview(`Correo ${input.responderA ? 'de respuesta' : 'nuevo'}${cliente ? ` a ${cliente}` : input.para ? ` a ${input.para}` : ''}${asunto ? `: ${asunto}` : ''}`, {
+      kind: 'mail', cliente, texto: String(input.texto || ''), para: input.para ? String(input.para) : undefined, asunto,
+      draftId, responderA: input.responderA ? String(input.responderA) : undefined,
+    }, agentId)
+    return `${toToolText(res.data)} — queda en "Para revisar" de la oficina para que el humano lo envíe.`
+  } catch (err) {
+    return `Error en correo_borrador: ${err instanceof Error ? err.message : 'desconocido'}`
   }
 }
 

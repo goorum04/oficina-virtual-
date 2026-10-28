@@ -3,6 +3,7 @@ import { gestoriaConfigured, gestoriaUpload, toToolText } from '@/lib/gestoria'
 import { bridgeStatus, pcConfigured, runPcCommand } from '@/lib/pc'
 import { officeProtected } from '@/lib/access'
 import { OFFICE_EXTS, officeText } from '@/lib/office-text'
+import { pdfForModel } from '@/lib/pdf-pages'
 
 // Herramientas para controlar el PC de la gestoría a través del puente
 // (pc-bridge/). Las tienen todos los agentes en cuanto PC_BRIDGE_TOKEN está
@@ -38,8 +39,8 @@ const TOOLS: PcTool[] = [
   },
   {
     name: 'pc_leer', readOnly: true,
-    description: 'Lee un archivo del PC: texto tal cual; PDF e imágenes los ves directamente; de Excel (.xlsx) y Word (.docx) recibes el texto (máx. 3 MB).',
-    properties: { path }, required: ['path'],
+    description: 'Lee un archivo del PC: texto tal cual; PDF e imágenes los ves directamente (de un PDF largo, 15 páginas cada vez: elige cuáles con paginas, p. ej. "16-30"); de Excel (.xlsx) y Word (.docx) recibes el texto. Hasta 30 MB.',
+    properties: { path, paginas: { type: 'string', description: 'Solo PDF: páginas a ver, "desde-hasta" (opcional)' } }, required: ['path'],
   },
   {
     name: 'pc_escribir',
@@ -145,7 +146,10 @@ export async function runPcTool(toolName: string, input: Record<string, unknown>
       case 'pc_ejecutar':
         return result(await runPcCommand('exec', { command: input.comando, cwd: input.carpeta, shell: input.shell }, agentId, 150_000))
       case 'pc_leer': {
-        const res = await runPcCommand('read', { path: input.path }, agentId)
+        let res = await runPcCommand('read', { path: input.path }, agentId)
+        // Más de 3 MB: se pide por trozos (cada respuesta del puente tiene
+        // que caber en el límite de Vercel) y se junta aquí.
+        if (!res.ok && /demasiado grande/i.test(String(res.data))) res = await readInChunks(String(input.path), agentId)
         if (!res.ok) return result(res)
         const file = res.data as ReadResult
         if (file.type === 'text') return file.text
@@ -153,7 +157,10 @@ export async function runPcTool(toolName: string, input: Record<string, unknown>
           return [{ type: 'image', source: { type: 'base64', media_type: file.mimeType as 'image/png', data: file.base64 } }]
         }
         if (file.mimeType === 'application/pdf') {
-          return [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: file.base64 } }]
+          const pdf = await pdfForModel(file.base64, typeof input.paginas === 'string' ? input.paginas : undefined)
+          const blocks: Exclude<ToolOutput, string> = [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf.base64 } }]
+          if (pdf.note) blocks.push({ type: 'text', text: pdf.note })
+          return blocks
         }
         const ext = (file.name.match(/\.[^.]+$/)?.[0] || '').toLowerCase()
         if (OFFICE_EXTS.includes(ext)) return `Contenido de "${file.name}":\n${officeText(file.name, file.base64)}`
@@ -171,6 +178,27 @@ export async function runPcTool(toolName: string, input: Record<string, unknown>
   } catch (err) {
     return `Error en ${toolName}: ${err instanceof Error ? err.message : 'desconocido'}`
   }
+}
+
+const CHUNK_BYTES = 3 * 1024 * 1024
+
+async function readInChunks(path: string, agentId: string): Promise<{ ok: boolean; data: unknown }> {
+  const parts: Buffer[] = []
+  let offset = 0
+  let first: { name: string; mimeType: string; size: number } | null = null
+  do {
+    const res = await runPcCommand('read', { path, offset, length: CHUNK_BYTES }, agentId)
+    if (!res.ok) return res
+    const chunk = res.data as { type: string; name: string; mimeType: string; size: number; base64: string }
+    if (chunk.type !== 'chunk') return { ok: false, data: 'El puente del PC no lee archivos grandes: actualízalo (OficinaPuente.zip nuevo).' }
+    first ??= chunk
+    const buf = Buffer.from(chunk.base64, 'base64')
+    if (!buf.length) break
+    parts.push(buf)
+    offset += buf.length
+  } while (first && offset < first.size)
+  if (!first) return { ok: false, data: 'No se pudo leer el archivo' }
+  return { ok: true, data: { type: 'binary', name: first.name, mimeType: first.mimeType, size: first.size, base64: Buffer.concat(parts).toString('base64') } }
 }
 
 function result(res: { ok: boolean; data: unknown }): string {

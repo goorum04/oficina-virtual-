@@ -28,6 +28,25 @@ export const FOCUS_CLIENTS: Array<{ name: string; clientId: string | null }> = [
 ]
 
 // Dos repasos al día en horario de oficina (≈8:00 y ≈14:00).
+// Además de los fijos, los clientes con trámites activos que se han movido
+// más recientemente, hasta MAX_FOCUS en total.
+const MAX_FOCUS = 12
+
+async function focusClients(): Promise<Array<{ name: string; clientId: string | null }>> {
+  const list = [...FOCUS_CLIENTS]
+  const res = await gestoriaFetch('GET', '/api/processes').catch(() => null)
+  if (!res?.ok || !Array.isArray(res.data)) return list
+  const active = (res.data as Array<{ clientId: string; status: string; updatedAt: string; client?: { firstName?: string; lastName?: string } }>)
+    .filter((p) => p.clientId && !CLOSED.includes(p.status))
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+  for (const p of active) {
+    if (list.length >= MAX_FOCUS) break
+    if (list.some((c) => c.clientId === p.clientId)) continue
+    list.push({ name: `${p.client?.firstName ?? ''} ${p.client?.lastName ?? ''}`.trim() || p.clientId, clientId: p.clientId })
+  }
+  return list
+}
+
 const FOCUS_EVERY_MS = 6 * 3600_000
 // Las tareas de foco llevan este prefijo: se sustituyen en cada ronda.
 const TASK_PREFIX = '★ '
@@ -130,13 +149,14 @@ export async function runFocusReview(): Promise<{ ok: boolean; message: string }
   await db.agent.updateMany({ where: { projectId, id: { in: Object.values(AGENT) } }, data: { status: 'working' } })
 
   try {
+    const clients = await focusClients()
     // Hugo: traer de HubSpot los documentos nuevos (solo añade, nunca borra).
     // En paralelo: cada sincronización puede tardar hasta un minuto.
-    const synced = await Promise.all(FOCUS_CLIENTS.filter((c) => c.clientId).map((c) =>
+    const synced = await Promise.all(clients.filter((c) => c.clientId).map((c) =>
       gestoriaFetch('POST', `/api/clients/${c.clientId}/sync-hubspot-documents`).catch(() => null)))
     const hubspotNew = synced.reduce((n, res) => n + (res?.ok ? Number((res.data as { newDocuments?: number })?.newDocuments) || 0 : 0), 0)
 
-    const briefings = await Promise.all(FOCUS_CLIENTS.map(async (c) => ({
+    const briefings = await Promise.all(clients.map(async (c) => ({
       name: c.name,
       briefing: c.clientId ? ((await clientBriefing(c.name, c.clientId)) as Briefing) : null,
     })))
@@ -147,7 +167,7 @@ export async function runFocusReview(): Promise<{ ok: boolean; message: string }
     tasks.push({
       agentId: AGENT.hubspot,
       title: `${TASK_PREFIX}HubSpot: documentos de los clientes prioritarios`,
-      description: `Sincronizados ${FOCUS_CLIENTS.filter((c) => c.clientId).length} clientes; ${hubspotNew} documento(s) nuevo(s).`,
+      description: `Sincronizados ${clients.filter((c) => c.clientId).length} clientes; ${hubspotNew} documento(s) nuevo(s).`,
       priority: 'low',
       progress: 100,
     })
@@ -172,10 +192,12 @@ export async function runFocusReview(): Promise<{ ok: boolean; message: string }
     const lastPlan = await db.activityLog.findFirst({ where: { type: 'focus_review', id: { not: log.id }, metadata: { contains: fingerprint } } })
     if (!lastPlan) await writePlan(lead.id, compact)
     await db.activityLog.update({ where: { id: log.id }, data: { metadata: JSON.stringify({ fingerprint }) } })
-    // Expedientes con correos nuevos desde su último trabajo (o de los
-    // últimos 3 días si nunca se trabajó) → cola del gestor de caso.
-    const queued: string[] = []
-    for (const c of FOCUS_CLIENTS) {
+    // Expedientes con correos nuevos del cliente desde su último trabajo (o
+    // de los últimos 3 días si nunca se trabajó). Antes de gastar en el
+    // gestor de caso, el modelo rápido mira en UNA consulta si de verdad hay
+    // algo que avanzar (un "gracias" no lo es).
+    const candidates: Array<{ clientId: string; name: string; correos: unknown[]; siguiente: string[] }> = []
+    for (const c of clients) {
       if (!c.clientId) continue
       const lastCase = await db.activityLog.findFirst({
         where: { type: 'case_run', metadata: { contains: c.clientId } },
@@ -185,16 +207,25 @@ export async function runFocusReview(): Promise<{ ok: boolean; message: string }
       if (lastCase && Date.now() - lastCase.createdAt.getTime() < 86_400_000) continue
       const since = lastCase?.createdAt ?? new Date(Date.now() - 3 * 86_400_000)
       const surnameTerm = c.name.split(' ').slice(-1)[0].toLowerCase()
-      const found = await runPcCommand('mail_search', { terminos: [surnameTerm], desde: since.toISOString(), max: 3, cuenta: OUTLOOK_ACCOUNT }, lead.id, 90_000)
+      const found = await runPcCommand('mail_search', { terminos: [surnameTerm], desde: since.toISOString(), max: 5, cuenta: OUTLOOK_ACCOUNT }, lead.id, 90_000)
       // Solo si el cliente ha escrito (lo que enviamos nosotros no es novedad).
-      const received = found.ok && Array.isArray(found.data) && (found.data as Array<{ carpeta?: string }>).some((m) => m.carpeta === 'recibido')
-      if (received) {
-        await enqueueCase(c.clientId, c.name, true)
-        queued.push(c.name)
-      }
+      const mails = (found.ok && Array.isArray(found.data) ? found.data : []) as Array<{ carpeta?: string; asunto?: string; fecha?: string; adjuntos?: string[]; extracto?: string }>
+      const received = mails.filter((m) => m.carpeta === 'recibido')
+      if (!received.length) continue
+      const b = briefings.find((x) => x.name === c.name)?.briefing
+      candidates.push({
+        clientId: c.clientId, name: c.name,
+        correos: received.map((m) => ({ fecha: m.fecha, asunto: m.asunto, adjuntos: m.adjuntos, texto: String(m.extracto || '').slice(0, 500) })),
+        siguiente: (b?.procesos ?? []).filter((p) => !CLOSED.includes(p.estado)).map((p) => `${p.titulo}: ${p.siguientePaso ?? '—'}`),
+      })
+    }
+    const queued: string[] = []
+    for (const c of await triage(candidates, lead.id)) {
+      await enqueueCase(c.clientId, c.name, true)
+      queued.push(c.name)
     }
 
-    const message = `${lead.name} repasó ${FOCUS_CLIENTS.length} clientes prioritarios: ${tasks.length} tareas repartidas al equipo${queued.length ? `; expedientes con novedades en cola: ${queued.join(', ')}` : ''}`
+    const message = `${lead.name} repasó ${clients.length} clientes prioritarios: ${tasks.length} tareas repartidas al equipo${queued.length ? `; expedientes con novedades en cola: ${queued.join(', ')}` : ''}`
     await db.activityLog.update({ where: { id: log.id }, data: { message } })
     return { ok: true, message }
   } catch (err) {
@@ -223,4 +254,36 @@ Escribe para el humano un plan breve: por cada cliente, 2-3 líneas (estado, lo 
   await db.message.create({
     data: { role: 'agent', content: text, model: 'haiku', inputTokens, outputTokens, costUsd: calcCostUsd('haiku', inputTokens, outputTokens), agentId: leadId },
   })
+}
+
+// Filtro barato antes del gestor de caso: ¿los correos nuevos del cliente
+// piden trabajo de la gestoría? Si la consulta falla, pasan todos.
+async function triage<T extends { name: string; correos: unknown[]; siguiente: string[] }>(candidates: T[], leadId: string): Promise<T[]> {
+  if (!candidates.length) return []
+  try {
+    const response = await anthropic.messages.create({
+      model: MODELS.haiku,
+      max_tokens: 600,
+      messages: [{
+        role: 'user',
+        content: `Gestoría en Andorra. Para cada cliente, ¿sus correos nuevos piden que la gestoría avance algo (mandan documentos o datos, preguntan, piden un trámite, responden a lo que se les pidió)? Un agradecimiento, un "ok", publicidad o un correo que no cambia nada NO cuenta.
+${JSON.stringify(candidates.map((c, n) => ({ n, cliente: c.name, siguientesPasos: c.siguiente, correosNuevos: c.correos })))}
+Responde SOLO con JSON: {"trabajar":[n, ...]}`,
+      }],
+    })
+    const text = response.content.filter((b) => b.type === 'text').map((b) => (b as { text: string }).text).join('')
+    const { input_tokens: inputTokens, output_tokens: outputTokens } = response.usage
+    const picked = new Set((JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as { trabajar?: number[] }).trabajar ?? [])
+    const yes = candidates.filter((_, n) => picked.has(n)).map((c) => c.name)
+    const no = candidates.filter((_, n) => !picked.has(n)).map((c) => c.name)
+    await db.message.create({
+      data: {
+        role: 'agent', model: 'haiku', inputTokens, outputTokens, costUsd: calcCostUsd('haiku', inputTokens, outputTokens), agentId: leadId,
+        content: `🔎 Correos nuevos de clientes: ${yes.length ? `trabajo los expedientes de ${yes.join(', ')}` : 'ninguno pide trabajo'}${no.length ? `; sin nada que avanzar: ${no.join(', ')}` : ''}.`,
+      },
+    }).catch(() => {})
+    return candidates.filter((_, n) => picked.has(n))
+  } catch {
+    return candidates
+  }
 }
