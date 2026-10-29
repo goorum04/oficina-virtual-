@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Bell, BellOff, Loader2 } from 'lucide-react'
+import { Bell, BellOff, Loader2, PhoneCall } from 'lucide-react'
 import { ReviewContent } from '@/components/office/ReviewPanel'
 import AskRayo from '@/components/office/AskRayo'
+import CallMode from '@/components/office/CallMode'
 
 // Versión para el móvil del panel "Para revisar": a pantalla completa, con
 // avisos (Web Push). En iPhone hay que añadirla antes a la pantalla de
@@ -22,6 +23,7 @@ type PushState = 'unsupported' | 'off' | 'on' | 'working' | 'denied'
 export default function RevisarPage() {
   const [push, setPush] = useState<PushState>('off')
   const [hint, setHint] = useState('')
+  const [callOpen, setCallOpen] = useState(false)
 
   useEffect(() => {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
@@ -69,7 +71,13 @@ export default function RevisarPage() {
     <div className="relative flex h-[100dvh] flex-col bg-white text-slate-800">
       <ReviewContent action={pushButton} />
       {hint && <p className="border-t border-slate-100 px-4 py-2 text-[12px] text-red-600">{hint}</p>}
+      <div className="border-t border-slate-200 bg-white px-4 pt-3">
+        <button onClick={() => setCallOpen(true)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-[15px] font-semibold text-white">
+          <PhoneCall className="h-4 w-4" />Escuchar una llamada
+        </button>
+      </div>
       <AskRayo />
+      {callOpen && <CallMode onClose={() => setCallOpen(false)} />}
       <a href="/" className="border-t border-slate-100 bg-white py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] text-center text-[13px] text-slate-500">Ir a la oficina</a>
     </div>
   )
