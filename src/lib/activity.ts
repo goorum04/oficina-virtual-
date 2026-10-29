@@ -9,7 +9,7 @@ export const ACTIVITY_FRESH_MS = 3 * 60_000
 
 // Filas internas del registro que no son actividad para mostrar (ajustes,
 // claves de los avisos, estado de trabajos, elementos de "Para revisar"…).
-export const HIDDEN_LOG_TYPES = ['case_state', 'review', 'daily_digest', 'setting', 'push_sub', 'agent_activity', 'odm_try']
+export const HIDDEN_LOG_TYPES = ['case_state', 'review', 'daily_digest', 'setting', 'push_sub', 'agent_activity', 'odm_try', 'call']
 
 export async function setActivity(agentId: string, text: string): Promise<void> {
   const metadata = JSON.stringify({ text: text.slice(0, 120), at: Date.now() })
