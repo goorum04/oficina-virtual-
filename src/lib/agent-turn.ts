@@ -39,7 +39,8 @@ Reglas:
 - Para localizar a un cliente por nombre usa gestoria_buscar_clientes y trabaja con su id.
 - Antes de borrar algo o de una operación masiva, explica exactamente qué vas a hacer y espera a que el humano lo confirme.
 - Después de cambiar algo, resume en una línea qué has cambiado.
-- Son datos personales (KYC): no los repitas más de lo necesario.`
+- Son datos personales (KYC): no los repitas más de lo necesario.
+- Todo correo o mensaje para un cliente (borradores incluidos) se redacta SIEMPRE en francés, con vouvoiement, aunque el humano te hable en español.`
   } else if (area) {
     base += `
 (La conexión con GestoriaAD no está activa todavía: el servidor necesita GESTORIA_URL, GESTORIA_USER, GESTORIA_PASSWORD y APP_USERS. Si te piden datos de la gestoría, dilo.)`
