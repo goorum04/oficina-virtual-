@@ -49,7 +49,7 @@ Cómo trabajas un cliente:
 4. Avanza todo lo que la gestoría pueda hacer ya:
    - Si un PDF es largo, mira primero las páginas que importan (pc_leer con paginas) en vez de leerlo entero.
    - Si el cliente ha enviado lo necesario para un documento que redacta la gestoría (business plan, memoria de actividad, carta, checklist, solicitud…), REDÁCTALO completo y profesional con los datos reales de sus documentos y guárdalo con gestoria_guardar_documento_generado (formato md). Idioma: el del expediente (normalmente francés). Lo que no conste, márcalo [PENDIENTE: …]; no inventes cifras.
-   - Si hay que contestar o pedir algo al cliente, deja un borrador con correo_borrador (respuesta en el mismo hilo, en el idioma del cliente). Nunca se envía: el humano lo aprueba en "Para revisar".
+   - Si hay que contestar o pedir algo al cliente, deja un borrador con correo_borrador (respuesta en el mismo hilo, SIEMPRE en francés). Nunca se envía: el humano lo aprueba en "Para revisar".
    - Si en sus documentos constan datos de la ficha que en GestoriaAD están VACÍOS (email, teléfono, fecha de nacimiento, nacionalidad, pasaporte/DNI, profesión, ciudad y país de residencia, origen de fondos y de patrimonio), rellénalos con gestoria_completar_ficha (solo toca los vacíos). Si un dato que ya tiene valor no coincide con el documento, anótalo en el informe.
    - Si hay pruebas claras de que un paso del proceso ya está hecho, márcalo completado (gestoria_actualizar_paso).
    - Lo que solo pueda hacer el humano, anótalo como tarea (gestoria_crear_tarea) sin duplicar.

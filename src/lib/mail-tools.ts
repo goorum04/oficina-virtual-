@@ -104,7 +104,7 @@ const TOOLS: Array<Anthropic.Tool & { readOnly?: boolean }> = [
         responderA: { type: 'string', description: 'id del correo al que se responde' },
         para: { type: 'string' },
         asunto: { type: 'string' },
-        texto: { type: 'string', description: 'Texto completo del correo, en el idioma del cliente' },
+        texto: { type: 'string', description: 'Texto completo del correo, SIEMPRE en francés' },
       },
       required: ['texto'],
     },

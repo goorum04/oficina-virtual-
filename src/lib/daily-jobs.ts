@@ -123,9 +123,8 @@ async function activeClients(): Promise<Client[]> {
   return (clients.data as Client[]).filter((c) => ids.has(c.id) && c.email)
 }
 
-function lang(c: Client): 'fr' | 'es' {
-  return /esp|spa|andor/i.test(String(c.nationality || '')) ? 'es' : 'fr'
-}
+// Los correos a clientes van siempre en francés.
+const LANG = 'fr' as const
 
 async function mailsWith(c: Client, days: number): Promise<Mail[]> {
   const res = await runPcCommand('mail_search', {
@@ -162,17 +161,16 @@ async function docChasers(job: Job): Promise<void> {
     }
 
     const level = previous.length + 1
-    const l = lang(c)
-    let draft = await gestoriaFetch('POST', `/api/clients/${c.id}/request-missing`, { lang: l, includeUploadLink: true })
-    if (!draft.ok) draft = await gestoriaFetch('POST', `/api/clients/${c.id}/request-missing`, { lang: l })
+    let draft = await gestoriaFetch('POST', `/api/clients/${c.id}/request-missing`, { lang: LANG, includeUploadLink: true })
+    if (!draft.ok) draft = await gestoriaFetch('POST', `/api/clients/${c.id}/request-missing`, { lang: LANG })
     if (!draft.ok) return
     const { subject, body } = draft.data as { subject: string; body: string }
-    const intro = l === 'fr'
-      ? (level === 1 ? 'Je me permets de revenir vers vous concernant votre dossier.' : 'Sans retour de votre part, je vous relance car votre dossier est en attente de ces éléments pour avancer.')
-      : (level === 1 ? 'Le escribo de nuevo en relación con su expediente.' : 'Al no haber recibido respuesta, le recuerdo que su expediente está parado a la espera de esta documentación.')
+    const intro = level === 1
+      ? 'Je me permets de revenir vers vous concernant votre dossier.'
+      : 'Sans retour de votre part, je vous relance car votre dossier est en attente de ces éléments pour avancer.'
     // La despedida de GestoriaAD se quita: Outlook añade la firma al enviar.
     const texto = body.replace(/^(.*\n)/, `$1\n${intro}\n`).replace(/\n(Bien cordialement|Un saludo),[\s\S]*$/, '').trim()
-    await saveDraft({ para: c.email, asunto: `${l === 'fr' ? (level === 1 ? 'Rappel' : 'Relance') : 'Recordatorio'} : ${subject}`, texto }, DOC_AGENT, `${c.firstName} ${c.lastName}`)
+    await saveDraft({ para: c.email, asunto: `${level === 1 ? 'Rappel' : 'Relance'} : ${subject}`, texto }, DOC_AGENT, `${c.firstName} ${c.lastName}`)
     const lead = await db.agent.findUnique({ where: { id: LEAD_ID }, select: { projectId: true } })
     if (lead) {
       await db.activityLog.create({
@@ -200,7 +198,7 @@ async function statusReports(job: Job): Promise<void> {
       max_tokens: 700,
       messages: [{
         role: 'user',
-        content: `Eres el gestor de una gestoría en Andorra. Escribe un correo breve (máx. 120 palabras) a ${c.firstName} ${c.lastName}, que lleva semanas sin noticias nuestras, contándole en qué punto está su trámite y el siguiente paso, y qué necesitamos de él si falta algo. Idioma: ${lang(c) === 'fr' ? 'francés' : 'español'}. Tono cercano y profesional, en primera persona; sin firma (se añade sola). Usa solo estos datos; no inventes fechas ni importes:
+        content: `Eres el gestor de una gestoría en Andorra. Escribe un correo breve (máx. 120 palabras) a ${c.firstName} ${c.lastName}, que lleva semanas sin noticias nuestras, contándole en qué punto está su trámite y el siguiente paso, y qué necesitamos de él si falta algo. Idioma: SIEMPRE francés (vouvoiement). Tono cercano y profesional, en primera persona; sin firma (se añade sola). Usa solo estos datos; no inventes fechas ni importes:
 ${JSON.stringify(briefing).slice(0, 5000)}
 Responde SOLO con JSON: {"asunto":"…","texto":"…"}`,
       }],
@@ -210,7 +208,7 @@ Responde SOLO con JSON: {"asunto":"…","texto":"…"}`,
     let out: { asunto?: string; texto?: string } = {}
     try { out = JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) } catch { return }
     if (!out.texto) return
-    await saveDraft({ para: c.email, asunto: out.asunto || (lang(c) === 'fr' ? 'Point sur votre dossier' : 'Estado de su expediente'), texto: out.texto }, LEAD_ID, `${c.firstName} ${c.lastName}`)
+    await saveDraft({ para: c.email, asunto: out.asunto || 'Point sur votre dossier', texto: out.texto }, LEAD_ID, `${c.firstName} ${c.lastName}`)
     job.state.out.push(`${c.firstName} ${c.lastName}`)
   })
   if (!finished) return

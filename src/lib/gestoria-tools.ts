@@ -202,9 +202,9 @@ const TOOLS: GestoriaTool[] = [
     area: 'clientes',
     name: 'gestoria_redactar_peticion_documentos',
     description: 'Redacta el borrador de correo al cliente pidiendo lo que falta (no lo envía). Opcionalmente incluye un enlace de subida.',
-    properties: { clientId: str, lang: { type: 'string', enum: ['fr', 'es'] }, includeUploadLink: { type: 'boolean' } },
+    properties: { clientId: str, lang: { type: 'string', enum: ['fr'], description: 'Siempre fr: los correos a clientes van en francés' }, includeUploadLink: { type: 'boolean' } },
     required: ['clientId'],
-    request: (i) => ({ method: 'POST', path: `/api/clients/${id(i.clientId)}/request-missing`, body: withoutKeys(i, ['clientId']) }),
+    request: (i) => ({ method: 'POST', path: `/api/clients/${id(i.clientId)}/request-missing`, body: { ...withoutKeys(i, ['clientId']), lang: 'fr' } }),
   },
   {
     area: 'clientes', readOnly: true,
